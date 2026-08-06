@@ -17,17 +17,38 @@
 // its bottom padding is sized from the device's actual inset via
 // MediaQuery instead of a hardcoded number — so it always sits
 // flush with the real bottom edge on any Android phone.
+//
+// THEME UPDATE: switched from the dark "Aurora Glass" bar to a
+// light "Daylight Aurora" (white + blue) bar so it matches the
+// white-body Dashboard instead of looking like a separate dark
+// panel bolted on underneath it.
 // ============================================================
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:quiz_lanka/config/appTheam.dart';
 
 // ============================================================
-// SHARED THEME TOKENS — "Aurora Glass"
-// Import AppTheme from this file in any screen that should match
-// the Dashboard / Login / Register / Onboarding visual language.
+// SHARED THEME TOKENS — "Daylight Aurora" (white + blue)
+// Local, self-contained light palette matching the Dashboard's
+// _Palette, so the bar reads as one continuous light surface
+// instead of a dark glass bar sitting under a white screen.
 // ============================================================
+class _BarPalette {
+  _BarPalette._();
+
+  static const Color violet = Color(0xFF7C3AED);
+
+  // Page/scaffold background behind the bar (matches Dashboard scaffold).
+  // Used only for the safe-area filler strip so there's never a color
+  // mismatch peeking through at the bottom edge.
+  static const Color scaffold = Color(0xFFF6F7FB);
+
+  // The bar itself — a white surface, same family as the Dashboard's cards.
+  static const Color barSurface = Colors.white;
+  static const Color border = Color(0xFFEBEDF5);
+
+  static const Color textSecondary = Color(0xFF6B7086);
+}
 
 // ============================================================
 // TABS
@@ -67,7 +88,7 @@ extension _AppTabMeta on AppTab {
 }
 
 // ============================================================
-// APP BOTTOM NAV — edge-to-edge glass bar, flush with the
+// APP BOTTOM NAV — edge-to-edge light bar, flush with the
 // device's real bottom edge on every phone
 // ============================================================
 class AppBottomNav extends StatelessWidget {
@@ -94,28 +115,28 @@ class AppBottomNav extends StatelessWidget {
     final bottomPadding = systemInset > 0 ? systemInset : _minBottomPadding;
 
     return Container(
-      // Solid, opaque match for the app's own background so there
-      // is no gap of a different color between this bar and the
-      // screen content behind it, even mid-transition.
-      color: AppTheme.backgroundGradient.last,
+      // Solid, opaque match for the app's own light background so
+      // there is no gap of a different color between this bar and
+      // the screen content behind it, even mid-transition.
+      color: _BarPalette.scaffold,
       padding: EdgeInsets.only(bottom: bottomPadding),
       child: Container(
         height: 64,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: const Color(0xFF14132F).withValues(alpha: 0.96),
+          color: _BarPalette.barSurface,
           borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(_barRadius),
             topRight: Radius.circular(_barRadius),
           ),
-          border: Border(
-            top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-          ),
-          boxShadow: [
+          border: Border(top: BorderSide(color: _BarPalette.border)),
+          boxShadow: const [
+            // Soft blue-tinted shadow, same family as the Dashboard's
+            // white cards, instead of a heavy black drop shadow.
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
-              blurRadius: 24,
-              offset: const Offset(0, -6),
+              color: Color(0x14232B6B),
+              blurRadius: 20,
+              offset: Offset(0, -6),
             ),
           ],
         ),
@@ -153,22 +174,24 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isSelected ? AppTheme.violet : AppTheme.textSecondary;
+    final color = isSelected ? _BarPalette.violet : _BarPalette.textSecondary;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
-        splashColor: AppTheme.violet.withValues(alpha: 0.12),
-        highlightColor: AppTheme.violet.withValues(alpha: 0.08),
+        splashColor: _BarPalette.violet.withValues(alpha: 0.12),
+        highlightColor: _BarPalette.violet.withValues(alpha: 0.08),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           decoration: BoxDecoration(
+            // Selected tab gets a soft violet tint on the white bar,
+            // rather than the darker glass highlight it had before.
             color: isSelected
-                ? AppTheme.violet.withValues(alpha: 0.16)
+                ? _BarPalette.violet.withValues(alpha: 0.1)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(16),
           ),

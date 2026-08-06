@@ -32,6 +32,7 @@ class _SplashTokens {
   static const List<Color> logoGradient = [Colors.white, Colors.white];
 
   static const String logoAsset = 'assets/Logo.png';
+  static const String splashBgAsset = 'assets/splash_bg.png'; // Add this line
 
   static const double logoSize = 118;
   static const double orbitRadius = 118;
@@ -163,11 +164,30 @@ class _SplashScreenState extends State<SplashScreen>
     return Scaffold(
       backgroundColor: _SplashTokens.backgroundGradient.first,
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
+          // Add the background image
+          image: DecorationImage(
+            image: AssetImage(_SplashTokens.splashBgAsset),
+            fit: BoxFit
+                .cover, // You can change this to BoxFit.fill or BoxFit.contain
+            colorFilter: ColorFilter.mode(
+              Colors.white.withOpacity(
+                0.85,
+              ), // Adjust opacity to make content readable
+              BlendMode.dstATop, // This blends the image with the gradient
+            ),
+          ),
+          // Keep the gradient as a fallback or overlay
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: _SplashTokens.backgroundGradient,
+            colors: _SplashTokens.backgroundGradient
+                .map(
+                  (color) => color.withOpacity(
+                    0.7,
+                  ), // Reduce opacity to show background image
+                )
+                .toList(),
           ),
         ),
         child: SafeArea(

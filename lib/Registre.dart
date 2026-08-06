@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:quiz_lanka/Login.dart'; // LoginScreen + AuthProvider
 import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/dashboard.dart';
+import 'package:quiz_lanka/main_navigation.dart';
 
 // ============================================================
 // DESIGN TOKENS — "Aurora Glass" theme (matches Login/Onboarding)
@@ -190,7 +191,7 @@ class _RegisterScreenState extends State<RegisterScreen>
 
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+          MaterialPageRoute(builder: (_) => const MainNavigation()),
         );
       } else if (!success && mounted) {
         final error = context.read<AuthProvider>().error;

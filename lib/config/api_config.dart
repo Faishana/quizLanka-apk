@@ -66,6 +66,12 @@ class ApiConfig {
   static String materialDetails(int materialId) => '/materials/$materialId';
 
   // ============================
+  // Profile
+  // ============================
+
+  static const String profilePhoto = '/profile/photo';
+
+  // ============================
   // Headers
   // ============================
 

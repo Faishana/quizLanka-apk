@@ -7,6 +7,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/config/appTheam.dart';
 import 'package:quiz_lanka/Login.dart';
@@ -98,7 +99,7 @@ class ProfileModel {
 }
 
 // ============================================================
-// 3. PROFILE SERVICE  (unchanged — logic untouched)
+// 3. PROFILE SERVICE  (updated with uploadProfilePhoto)
 // ============================================================
 
 class ProfileService {
@@ -270,6 +271,38 @@ class ProfileService {
     }
   }
 
+  // NEW: Upload profile photo with Horizon queue support
+  Future<void> uploadProfilePhoto(File image) async {
+    final token = await TokenStorage.getToken();
+
+    if (token == null || token.isEmpty) {
+      throw Exception('Authentication token not found.');
+    }
+
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('${ApiConfig.baseUrl}${ApiConfig.profilePhoto}'),
+    );
+
+    request.headers.addAll({
+      'Accept': 'application/json',
+      'Authorization': 'Bearer $token',
+    });
+
+    request.files.add(await http.MultipartFile.fromPath('photo', image.path));
+
+    final response = await request.send();
+
+    final body = await response.stream.bytesToString();
+
+    debugPrint('Status: ${response.statusCode}');
+    debugPrint('Response: $body');
+
+    if (response.statusCode != 200) {
+      throw Exception(body);
+    }
+  }
+
   void dispose() {
     _client.close();
   }
@@ -309,9 +342,11 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final ProfileService _service = ProfileService();
+  final ImagePicker _picker = ImagePicker();
 
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _uploadingAvatar = false;
   String? _error;
 
   ProfileModel? _profile;
@@ -323,6 +358,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   GradeModel? _selectedGrade;
   String? _selectedDistrict;
   String? _selectedMedium;
+
+  // Polling controller for avatar generation
+  Timer? _pollTimer;
+  int _pollAttempts = 0;
+  static const int _maxPollAttempts = 30; // 60 seconds max
 
   @override
   void initState() {
@@ -337,6 +377,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _nameController.dispose();
     _schoolController.dispose();
     _service.dispose();
+    _pollTimer?.cancel();
     super.dispose();
   }
 
@@ -391,6 +432,198 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  // NEW: Pick profile photo from gallery
+  Future<void> _pickProfilePhoto() async {
+    try {
+      // Show bottom sheet with options
+      final source = await _showImageSourcePicker();
+      if (source == null) return;
+
+      final XFile? image = await _picker.pickImage(
+        source: source,
+        imageQuality: 90,
+      );
+
+      if (image == null) {
+        return;
+      }
+
+      setState(() {
+        _uploadingAvatar = true;
+      });
+
+      await _service.uploadProfilePhoto(File(image.path));
+
+      // Show generating dialog
+      _showGeneratingDialog();
+
+      // Start polling for the updated profile
+      _pollProfileEvery2Seconds();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString()),
+            backgroundColor: _Palette.danger,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _uploadingAvatar = false;
+        });
+      }
+    }
+  }
+
+  // NEW: Show image source picker (Camera/Gallery)
+  Future<ImageSource?> _showImageSourcePicker() async {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: _Palette.cardGlass,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: AppTheme.violet),
+              title: const Text(
+                'Gallery',
+                style: TextStyle(color: _Palette.textPrimary),
+              ),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: AppTheme.violet),
+              title: const Text(
+                'Camera',
+                style: TextStyle(color: _Palette.textPrimary),
+              ),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.close, color: _Palette.danger),
+              title: const Text(
+                'Cancel',
+                style: TextStyle(color: _Palette.danger),
+              ),
+              onTap: () => Navigator.pop(context, null),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // NEW: Show generating dialog
+  void _showGeneratingDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: _Palette.cardGlass,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(
+              color: AppTheme.violet,
+              strokeWidth: 3,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Generating Avatar...',
+              style: TextStyle(
+                color: _Palette.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your profile picture is being processed.',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // NEW: Poll profile every 2 seconds until avatar is ready
+  void _pollProfileEvery2Seconds() {
+    _pollAttempts = 0;
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+      _pollAttempts++;
+
+      if (_pollAttempts > _maxPollAttempts) {
+        timer.cancel();
+        if (mounted) {
+          Navigator.pop(context); // Close generating dialog
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'Avatar generation is taking longer than expected. Please refresh later.',
+              ),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
+      try {
+        final updatedProfile = await _service.getProfile();
+
+        if (updatedProfile.avatarUrl != null &&
+            updatedProfile.avatarUrl!.isNotEmpty &&
+            updatedProfile.avatarUrl != _profile?.avatarUrl) {
+          timer.cancel();
+
+          if (mounted && Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          }
+
+          setState(() {
+            _profile = updatedProfile;
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Avatar generated successfully')),
+          );
+        }
+      } catch (e) {
+        debugPrint("Polling error: $e");
+      }
+    });
   }
 
   Future<void> _saveProfile() async {
@@ -547,6 +780,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     },
                     isSaving: _isSaving,
                     onSave: _saveProfile,
+                    uploadingAvatar: _uploadingAvatar,
+                    onAvatarTap: _pickProfilePhoto,
                   ),
           ),
         ],
@@ -696,6 +931,8 @@ class _ProfileContent extends StatelessWidget {
   final ValueChanged<String> onMediumChanged;
   final bool isSaving;
   final VoidCallback onSave;
+  final bool uploadingAvatar;
+  final VoidCallback onAvatarTap;
 
   const _ProfileContent({
     required this.profile,
@@ -710,6 +947,8 @@ class _ProfileContent extends StatelessWidget {
     required this.onMediumChanged,
     required this.isSaving,
     required this.onSave,
+    required this.uploadingAvatar,
+    required this.onAvatarTap,
   });
 
   @override
@@ -722,6 +961,8 @@ class _ProfileContent extends StatelessWidget {
             name: profile.name,
             email: profile.email,
             avatarUrl: profile.avatarUrl,
+            uploading: uploadingAvatar,
+            onTap: onAvatarTap,
           ),
           const SizedBox(height: 20),
           _ProfileForm(
@@ -775,17 +1016,21 @@ class _GlassCard extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Avatar Section
+// Avatar Section (updated with tap & loading states)
 // ------------------------------------------------------------
 class _AvatarSection extends StatelessWidget {
   final String name;
   final String email;
   final String? avatarUrl;
+  final VoidCallback onTap;
+  final bool uploading;
 
   const _AvatarSection({
     required this.name,
     required this.email,
     this.avatarUrl,
+    required this.onTap,
+    required this.uploading,
   });
 
   @override
@@ -793,55 +1038,71 @@ class _AvatarSection extends StatelessWidget {
     return _GlassCard(
       child: Column(
         children: [
-          Stack(
-            children: [
-              Container(
-                width: 90,
-                height: 90,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppTheme.violet, width: 2),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(3),
-                  child: CircleAvatar(
-                    radius: 40,
-                    backgroundColor: AppTheme.violet.withValues(alpha: 0.18),
-                    backgroundImage: avatarUrl != null && avatarUrl!.isNotEmpty
-                        ? NetworkImage(avatarUrl!)
-                        : null,
-                    child: avatarUrl == null || avatarUrl!.isEmpty
-                        ? Text(
-                            name.isNotEmpty ? name[0].toUpperCase() : '?',
-                            style: TextStyle(
-                              fontSize: 30,
-                              fontWeight: FontWeight.w700,
+          GestureDetector(
+            onTap: uploading ? null : onTap,
+            child: Stack(
+              children: [
+                Container(
+                  width: 90,
+                  height: 90,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppTheme.violet, width: 2),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: uploading
+                        ? const Center(
+                            child: CircularProgressIndicator(
                               color: AppTheme.violet,
+                              strokeWidth: 2.5,
                             ),
                           )
-                        : null,
+                        : CircleAvatar(
+                            radius: 40,
+                            backgroundColor: AppTheme.violet.withValues(
+                              alpha: 0.18,
+                            ),
+                            backgroundImage:
+                                avatarUrl != null && avatarUrl!.isNotEmpty
+                                ? NetworkImage(avatarUrl!)
+                                : null,
+                            child: avatarUrl == null || avatarUrl!.isEmpty
+                                ? Text(
+                                    name.isNotEmpty
+                                        ? name[0].toUpperCase()
+                                        : '?',
+                                    style: TextStyle(
+                                      fontSize: 30,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.violet,
+                                    ),
+                                  )
+                                : null,
+                          ),
                   ),
                 ),
-              ),
-              Positioned(
-                bottom: 0,
-                right: 0,
-                child: Container(
-                  width: 30,
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: AppTheme.violet,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: _Palette.cardGlass, width: 3),
-                  ),
-                  child: const Icon(
-                    Icons.camera_alt_rounded,
-                    color: Colors.white,
-                    size: 15,
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: uploading ? Colors.grey : AppTheme.violet,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: _Palette.cardGlass, width: 3),
+                    ),
+                    child: Icon(
+                      Icons.camera_alt_rounded,
+                      color: uploading ? Colors.grey[400] : Colors.white,
+                      size: 15,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           const SizedBox(height: 14),
           Text(
@@ -866,11 +1127,11 @@ class _AvatarSection extends StatelessWidget {
               border: Border.all(color: AppTheme.violet.withValues(alpha: 0.3)),
             ),
             child: Text(
-              'Read Only',
+              uploading ? 'Uploading...' : 'Tap to change photo',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.violet,
+                color: uploading ? Colors.grey : AppTheme.violet,
               ),
             ),
           ),

@@ -1,6 +1,7 @@
 // ignore_for_file: file_names
 
 import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -11,7 +12,7 @@ import 'package:quiz_lanka/main_navigation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ============================================================
-// 2. TOKEN STORAGE — unchanged
+// TOKEN STORAGE — unchanged
 // ============================================================
 class TokenStorage {
   static const String _tokenKey = 'auth_token';
@@ -58,7 +59,7 @@ class TokenStorage {
 }
 
 // ============================================================
-// 3. USER MODEL — unchanged
+// USER MODEL — unchanged
 // ============================================================
 class User {
   final int? id;
@@ -105,7 +106,7 @@ class User {
 }
 
 // ============================================================
-// 4. AUTH SERVICE — unchanged
+// AUTH SERVICE — unchanged
 // ============================================================
 class AuthService {
   final http.Client _client = http.Client();
@@ -261,7 +262,7 @@ class AuthService {
 }
 
 // ============================================================
-// 5. AUTH PROVIDER — unchanged
+// AUTH PROVIDER — unchanged
 // ============================================================
 class AuthProvider extends ChangeNotifier {
   final AuthService _authService = AuthService();
@@ -395,9 +396,7 @@ class AuthProvider extends ChangeNotifier {
 }
 
 // ============================================================
-// DESIGN TOKENS — "Aurora Glass" theme
-// A single dark gradient surface with translucent glass fields,
-// instead of a hero photo + white bottom-sheet layout.
+// DESIGN TOKENS — "Aurora Glass" theme (contrast-tuned)
 // ============================================================
 class _LoginTokens {
   _LoginTokens._();
@@ -408,18 +407,19 @@ class _LoginTokens {
     Color(0xFF1D1B4B),
   ];
 
-  static const Color violet = Color(0xFF9B6BFF);
-  static const Color cyan = Color(0xFF3FB4FF);
+  static const Color violet = Color(0xFF9B7BFF);
+  static const Color cyan = Color(0xFF4FC3FF);
   static const Color textPrimary = Colors.white;
-  static const Color textSecondary = Color(0xFFB9B6D9);
-  static const Color danger = Color(0xFFFF7A7A);
+  // Brighter secondary so copy stays legible over busy artwork.
+  static const Color textSecondary = Color(0xFFD6D3F0);
+  static const Color danger = Color(0xFFFF8A8A);
 
   static const double fieldRadius = 16;
   static const double cardRadius = 28;
 }
 
 // ============================================================
-// LOGIN SCREEN — redesigned UI, identical behavior
+// LOGIN SCREEN
 // ============================================================
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -437,6 +437,7 @@ class _LoginScreenState extends State<LoginScreen>
   bool _obscurePassword = true;
   bool _rememberMe = true;
   bool _isCheckingAuth = true;
+  AutovalidateMode _autovalidateMode = AutovalidateMode.disabled;
 
   late AnimationController _animController;
   late Animation<double> _cardSlide;
@@ -469,11 +470,6 @@ class _LoginScreenState extends State<LoginScreen>
     });
   }
 
-  // FIX: this used to push DashboardScreen directly, which is why
-  // the bottom bar disappeared — DashboardScreen no longer owns a
-  // bottomNavigationBar of its own. It must go through
-  // MainNavigation, the shell that owns the single fixed bar and
-  // hosts all five tabs in an IndexedStack.
   void _goToDashboard() {
     Navigator.pushReplacement(
       context,
@@ -482,6 +478,10 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleLogin(AuthProvider auth) async {
+    // Only start showing field-level red errors once the user has
+    // actually tried to submit — not on first render.
+    setState(() => _autovalidateMode = AutovalidateMode.onUserInteraction);
+
     if (!_formKey.currentState!.validate()) return;
     auth.clearError();
 
@@ -512,53 +512,72 @@ class _LoginScreenState extends State<LoginScreen>
             return const _LoadingScreen();
           }
 
-          return Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: _LoginTokens.backgroundGradient,
-              ),
-            ),
-            child: Stack(
-              children: [
-                Positioned(
-                  top: -70,
-                  right: -50,
-                  child: _GlowBlob(color: _LoginTokens.violet, size: 260),
-                ),
-                Positioned(
-                  bottom: -60,
-                  left: -50,
-                  child: _GlowBlob(color: _LoginTokens.cyan, size: 220),
-                ),
-                SafeArea(
-                  child: SingleChildScrollView(
-                    physics: const ClampingScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: AnimatedBuilder(
-                      animation: _animController,
-                      builder: (_, child) => Opacity(
-                        opacity: _cardFade.value,
-                        child: Transform.translate(
-                          offset: Offset(0, _cardSlide.value),
-                          child: child,
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          const SizedBox(height: 32),
-                          const _BrandMark(),
-                          const SizedBox(height: 36),
-                          _buildFormCard(auth),
-                          const SizedBox(height: 24),
-                        ],
+          return Stack(
+            children: [
+              // 1. Background artwork
+              Positioned.fill(
+                child: Image.asset(
+                  'assets/login_bg.png',
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, error, stackTrace) => Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: _LoginTokens.backgroundGradient,
                       ),
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+
+              // 2. Darkening scrim — stronger top & bottom, lighter
+              // in the middle, so text stays legible over busy art
+              // without hiding the illustration completely.
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.55),
+                        Colors.black.withValues(alpha: 0.25),
+                        Colors.black.withValues(alpha: 0.65),
+                      ],
+                      stops: const [0.0, 0.35, 1.0],
+                    ),
+                  ),
+                ),
+              ),
+
+              // 3. Safe area & form
+              SafeArea(
+                child: SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: AnimatedBuilder(
+                    animation: _animController,
+                    builder: (_, child) => Opacity(
+                      opacity: _cardFade.value,
+                      child: Transform.translate(
+                        offset: Offset(0, _cardSlide.value),
+                        child: child,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 28),
+                        const _BrandMark(),
+                        const SizedBox(height: 32),
+                        _buildFormCard(auth),
+                        const SizedBox(height: 24),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -567,208 +586,231 @@ class _LoginScreenState extends State<LoginScreen>
 
   // ── form card ──────────────────────────────────────────────
   Widget _buildFormCard(AuthProvider auth) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(_LoginTokens.cardRadius),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-      ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Welcome Back!',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w900,
-                color: _LoginTokens.textPrimary,
-                letterSpacing: -0.5,
+    // Real glassmorphism: blur what's behind the card, then lay a
+    // semi-opaque tint on top so the card reads as a solid, legible
+    // surface instead of a washed-out see-through rectangle.
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(_LoginTokens.cardRadius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1B1740).withValues(alpha: 0.62),
+            borderRadius: BorderRadius.circular(_LoginTokens.cardRadius),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 30,
+                offset: const Offset(0, 12),
               ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Login to continue your AI learning journey.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13.5,
-                color: _LoginTokens.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 22),
-
-            if (auth.error != null)
-              _ErrorBanner(message: auth.error!, onDismiss: auth.clearError),
-
-            _GlassTextField(
-              controller: _emailController,
-              hint: 'Email Address',
-              icon: Icons.mail_outline_rounded,
-              keyboardType: TextInputType.emailAddress,
-              validator: (v) {
-                if (v == null || v.isEmpty) return 'Enter your email';
-                if (!v.contains('@')) return 'Enter a valid email';
-                return null;
-              },
-            ),
-            const SizedBox(height: 14),
-
-            _GlassTextField(
-              controller: _passwordController,
-              hint: 'Password',
-              icon: Icons.lock_outline_rounded,
-              obscure: _obscurePassword,
-              suffix: IconButton(
-                icon: Icon(
-                  _obscurePassword
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined,
-                  color: _LoginTokens.textSecondary,
-                  size: 20,
-                ),
-                onPressed: () =>
-                    setState(() => _obscurePassword = !_obscurePassword),
-              ),
-              validator: (v) {
-                if (v == null || v.isEmpty) return 'Enter your password';
-                if (v.length < 6) return 'Minimum 6 characters';
-                return null;
-              },
-            ),
-            const SizedBox(height: 14),
-
-            Row(
+            ],
+          ),
+          child: Form(
+            key: _formKey,
+            autovalidateMode: _autovalidateMode,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                GestureDetector(
-                  onTap: () => setState(() => _rememberMe = !_rememberMe),
-                  child: Row(
-                    children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color: _rememberMe
-                              ? _LoginTokens.violet
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(5),
-                          border: Border.all(
-                            color: _rememberMe
-                                ? _LoginTokens.violet
-                                : _LoginTokens.textSecondary,
-                            width: 1.5,
+                const Text(
+                  'Welcome Back!',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                    color: _LoginTokens.textPrimary,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Login to continue your AI learning journey.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    color: _LoginTokens.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 22),
+
+                if (auth.error != null)
+                  _ErrorBanner(
+                    message: auth.error!,
+                    onDismiss: auth.clearError,
+                  ),
+
+                _GlassTextField(
+                  controller: _emailController,
+                  hint: 'Email Address',
+                  icon: Icons.mail_outline_rounded,
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Enter your email';
+                    if (!v.contains('@')) return 'Enter a valid email';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 14),
+
+                _GlassTextField(
+                  controller: _passwordController,
+                  hint: 'Password',
+                  icon: Icons.lock_outline_rounded,
+                  obscure: _obscurePassword,
+                  suffix: IconButton(
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      color: _LoginTokens.textSecondary,
+                      size: 20,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Enter your password';
+                    if (v.length < 6) return 'Minimum 6 characters';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 14),
+
+                Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () => setState(() => _rememberMe = !_rememberMe),
+                      child: Row(
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: 20,
+                            height: 20,
+                            decoration: BoxDecoration(
+                              color: _rememberMe
+                                  ? _LoginTokens.violet
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(5),
+                              border: Border.all(
+                                color: _rememberMe
+                                    ? _LoginTokens.violet
+                                    : _LoginTokens.textSecondary,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: _rememberMe
+                                ? const Icon(
+                                    Icons.check,
+                                    color: Colors.white,
+                                    size: 13,
+                                  )
+                                : null,
                           ),
-                        ),
-                        child: _rememberMe
-                            ? const Icon(
-                                Icons.check,
-                                color: Colors.white,
-                                size: 13,
-                              )
-                            : null,
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Remember me',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: _LoginTokens.textSecondary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Remember me',
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () {
+                        // TODO: forgot password
+                      },
+                      child: const Text(
+                        'Forgot Password?',
                         style: TextStyle(
                           fontSize: 13,
-                          color: _LoginTokens.textSecondary,
+                          color: _LoginTokens.cyan,
+                          fontWeight: FontWeight.w700,
                         ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+
+                _GradientButton(
+                  label: 'Login',
+                  isLoading: auth.isLoading,
+                  onTap: () => _handleLogin(auth),
+                ),
+                const SizedBox(height: 20),
+
+                _GlassActionTile(
+                  icon: Icons.person_add_outlined,
+                  title: 'Create New Account',
+                  subtitle: 'Join QuizLanka AI today!',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                RichText(
+                  textAlign: TextAlign.center,
+                  text: TextSpan(
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: _LoginTokens.textSecondary,
+                      height: 1.5,
+                    ),
+                    children: [
+                      const TextSpan(text: 'By continuing, you agree to our '),
+                      TextSpan(
+                        text: 'Terms of Service',
+                        style: const TextStyle(
+                          color: _LoginTokens.cyan,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        recognizer: TapGestureRecognizer()..onTap = () {},
+                      ),
+                      const TextSpan(text: ' and '),
+                      TextSpan(
+                        text: 'Privacy Policy',
+                        style: const TextStyle(
+                          color: _LoginTokens.cyan,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        recognizer: TapGestureRecognizer()..onTap = () {},
                       ),
                     ],
                   ),
                 ),
-                const Spacer(),
-                GestureDetector(
-                  onTap: () {
-                    // TODO: forgot password
-                  },
-                  child: const Text(
-                    'Forgot Password?',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: _LoginTokens.cyan,
-                      fontWeight: FontWeight.w600,
+                const SizedBox(height: 12),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.verified_user_outlined,
+                      color: _LoginTokens.violet.withValues(alpha: 0.95),
+                      size: 14,
                     ),
-                  ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Your data is secure with us',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: _LoginTokens.violet.withValues(alpha: 0.95),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-            const SizedBox(height: 22),
-
-            _GradientButton(
-              label: 'Login',
-              isLoading: auth.isLoading,
-              onTap: () => _handleLogin(auth),
-            ),
-            const SizedBox(height: 20),
-
-            _GlassActionTile(
-              icon: Icons.person_add_outlined,
-              title: 'Create New Account',
-              subtitle: 'Join QuizLanka AI today!',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const RegisterScreen()),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            RichText(
-              textAlign: TextAlign.center,
-              text: TextSpan(
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  color: _LoginTokens.textSecondary,
-                ),
-                children: [
-                  const TextSpan(text: 'By continuing, you agree to our '),
-                  TextSpan(
-                    text: 'Terms of Service',
-                    style: const TextStyle(
-                      color: _LoginTokens.cyan,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    recognizer: TapGestureRecognizer()..onTap = () {},
-                  ),
-                  const TextSpan(text: ' and '),
-                  TextSpan(
-                    text: 'Privacy Policy',
-                    style: const TextStyle(
-                      color: _LoginTokens.cyan,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    recognizer: TapGestureRecognizer()..onTap = () {},
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.verified_user_outlined,
-                  color: _LoginTokens.violet.withValues(alpha: 0.8),
-                  size: 14,
-                ),
-                const SizedBox(width: 5),
-                Text(
-                  'Your data is secure with us',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: _LoginTokens.violet.withValues(alpha: 0.8),
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -799,25 +841,8 @@ class _LoadingScreen extends StatelessWidget {
   }
 }
 
-class _GlowBlob extends StatelessWidget {
-  const _GlowBlob({required this.color, required this.size});
-  final Color color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: color.withValues(alpha: 0.18),
-      ),
-    );
-  }
-}
-
-/// Logo mark + wordmark shown above the form card.
+/// Logo mark + wordmark shown above the form card. Given its own
+/// soft dark backing so it stays legible over busy artwork too.
 class _BrandMark extends StatelessWidget {
   const _BrandMark();
 
@@ -835,8 +860,8 @@ class _BrandMark extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: _LoginTokens.violet.withValues(alpha: 0.4),
-                blurRadius: 24,
+                color: _LoginTokens.violet.withValues(alpha: 0.5),
+                blurRadius: 26,
                 spreadRadius: 2,
               ),
             ],
@@ -857,6 +882,7 @@ class _BrandMark extends StatelessWidget {
                   color: _LoginTokens.textPrimary,
                   fontWeight: FontWeight.w900,
                   fontSize: 22,
+                  shadows: [Shadow(color: Colors.black45, blurRadius: 12)],
                 ),
               ),
               TextSpan(
@@ -865,15 +891,21 @@ class _BrandMark extends StatelessWidget {
                   color: _LoginTokens.violet,
                   fontWeight: FontWeight.w900,
                   fontSize: 22,
+                  shadows: [Shadow(color: Colors.black45, blurRadius: 12)],
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 4),
         const Text(
           'Learn Smart. Rank Higher.',
-          style: TextStyle(color: _LoginTokens.textSecondary, fontSize: 12),
+          style: TextStyle(
+            color: _LoginTokens.textSecondary,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w500,
+            shadows: [Shadow(color: Colors.black45, blurRadius: 8)],
+          ),
         ),
       ],
     );
@@ -891,9 +923,9 @@ class _ErrorBanner extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: _LoginTokens.danger.withValues(alpha: 0.12),
+        color: _LoginTokens.danger.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _LoginTokens.danger.withValues(alpha: 0.35)),
+        border: Border.all(color: _LoginTokens.danger.withValues(alpha: 0.45)),
       ),
       child: Row(
         children: [
@@ -902,14 +934,18 @@ class _ErrorBanner extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(color: _LoginTokens.danger, fontSize: 13),
+              style: const TextStyle(
+                color: _LoginTokens.danger,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
           GestureDetector(
             onTap: onDismiss,
             child: Icon(
               Icons.close,
-              color: _LoginTokens.danger.withValues(alpha: 0.7),
+              color: _LoginTokens.danger.withValues(alpha: 0.8),
               size: 18,
             ),
           ),
@@ -919,8 +955,8 @@ class _ErrorBanner extends StatelessWidget {
   }
 }
 
-/// Translucent glass-style text field replacing the original
-/// filled light-background input.
+/// Glass-style text field, tuned for readability: solid-enough fill,
+/// bright hint text, and a clearly visible caret/border on focus.
 class _GlassTextField extends StatelessWidget {
   const _GlassTextField({
     required this.controller,
@@ -946,19 +982,29 @@ class _GlassTextField extends StatelessWidget {
       controller: controller,
       keyboardType: keyboardType,
       obscureText: obscure,
-      style: const TextStyle(fontSize: 14.5, color: _LoginTokens.textPrimary),
+      style: const TextStyle(
+        fontSize: 15,
+        color: _LoginTokens.textPrimary,
+        fontWeight: FontWeight.w500,
+      ),
       validator: validator,
       cursorColor: _LoginTokens.violet,
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: TextStyle(
-          color: _LoginTokens.textSecondary.withValues(alpha: 0.7),
-          fontSize: 14,
+        hintStyle: const TextStyle(
+          color: Color(0xFFC9C6E8),
+          fontSize: 14.5,
+          fontWeight: FontWeight.w400,
         ),
         prefixIcon: Icon(icon, color: _LoginTokens.textSecondary, size: 20),
         suffixIcon: suffix,
+        errorStyle: const TextStyle(
+          color: _LoginTokens.danger,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
         filled: true,
-        fillColor: Colors.white.withValues(alpha: 0.05),
+        fillColor: Colors.white.withValues(alpha: 0.10),
         contentPadding: const EdgeInsets.symmetric(
           vertical: 16,
           horizontal: 16,
@@ -966,7 +1012,7 @@ class _GlassTextField extends StatelessWidget {
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(_LoginTokens.fieldRadius),
           borderSide: BorderSide(
-            color: Colors.white.withValues(alpha: 0.12),
+            color: Colors.white.withValues(alpha: 0.20),
             width: 1.2,
           ),
         ),
@@ -977,8 +1023,8 @@ class _GlassTextField extends StatelessWidget {
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(_LoginTokens.fieldRadius),
           borderSide: BorderSide(
-            color: _LoginTokens.danger.withValues(alpha: 0.6),
-            width: 1.2,
+            color: _LoginTokens.danger.withValues(alpha: 0.7),
+            width: 1.3,
           ),
         ),
         focusedErrorBorder: OutlineInputBorder(
@@ -1016,8 +1062,8 @@ class _GradientButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(27),
           boxShadow: [
             BoxShadow(
-              color: _LoginTokens.violet.withValues(alpha: 0.4),
-              blurRadius: 18,
+              color: _LoginTokens.violet.withValues(alpha: 0.45),
+              blurRadius: 20,
               offset: const Offset(0, 8),
             ),
           ],
@@ -1074,9 +1120,9 @@ class _GlassActionTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.05),
+          color: Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
         ),
         child: Row(
           children: [
@@ -1084,7 +1130,7 @@ class _GlassActionTile extends StatelessWidget {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: _LoginTokens.violet.withValues(alpha: 0.18),
+                color: _LoginTokens.violet.withValues(alpha: 0.25),
                 borderRadius: BorderRadius.circular(11),
               ),
               child: Icon(icon, color: _LoginTokens.violet, size: 22),
@@ -1108,6 +1154,7 @@ class _GlassActionTile extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 11.5,
                       color: _LoginTokens.textSecondary,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
@@ -1115,7 +1162,7 @@ class _GlassActionTile extends StatelessWidget {
             ),
             Icon(
               Icons.chevron_right,
-              color: _LoginTokens.textSecondary.withValues(alpha: 0.7),
+              color: _LoginTokens.textSecondary.withValues(alpha: 0.85),
               size: 20,
             ),
           ],
