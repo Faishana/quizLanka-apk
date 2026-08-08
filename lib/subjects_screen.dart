@@ -171,28 +171,8 @@ class _Palette {
   static const Color textSecondary = Color(0xFF6E7188);
   static const Color textMuted = Color(0xFF9A9CB0);
 
-  static const Color success = Color(0xFF15A56B);
   static const Color danger = Color(0xFFEF4444);
 
-  static BoxDecoration card({double radius = 24, Color? tint}) {
-    return BoxDecoration(
-      color: cardWhite,
-      borderRadius: BorderRadius.circular(radius),
-      border: Border.all(color: tint ?? border),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x14232B6B),
-          blurRadius: 24,
-          offset: Offset(0, 10),
-        ),
-        BoxShadow(
-          color: Color(0x08232B6B),
-          blurRadius: 4,
-          offset: Offset(0, 1),
-        ),
-      ],
-    );
-  }
 
   static BoxDecoration glass({double radius = 18}) {
     return BoxDecoration(

@@ -1,16 +1,64 @@
 // settings_screen.dart
 // ============================================================
-// 1. IMPORTS
+// REDESIGN NOTES
 // ============================================================
+// Restyled to the same LIGHT theme as the redesigned ProfileScreen
+// (soft lavender-white surfaces, glass cards, violet/cyan accents).
+// All persistence/logout/navigation LOGIC is unchanged:
+//   - language load/save via SharedPreferences
+//   - logout via TokenStorage.clearAll() + navigation reset
+//   - navigation to ProfileScreen
+//   - About dialog content
+//   - AutomaticKeepAliveClientMixin behaviour
+//
+// THEME SOURCE: the original file pulled colors from `AppTheme`
+// (appTheam.dart) mixed with hardcoded dark surfaces (0xFF201E4A,
+// 0xFF14132F, white-opacity borders) — that combination is what was
+// producing the dark look. Since I don't have access to appTheam.dart
+// to know what's already defined there, this version defines its own
+// self-contained `_Palette` (same values as ProfileScreen's) instead.
+// If appTheam.dart already has matching light tokens, prefer wiring
+// those in here — and ideally extract one shared `_Palette`/`AppTheme`
+// used by both screens rather than duplicating it per-file.
+// ============================================================
+
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:quiz_lanka/Login.dart';
 import 'package:quiz_lanka/ProfileScreen.dart';
-import 'package:quiz_lanka/config/appTheam.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ============================================================
-// 2. SETTINGS SCREEN — simplified to essential settings only,
-// redesigned UI, identical persistence/logout/profile logic
+// PALETTE — kept identical to ProfileScreen's light palette so
+// both screens feel like the same app. TODO: move this into a
+// shared theme file (e.g. appTheam.dart) instead of duplicating
+// it in every screen.
+// ============================================================
+class _Palette {
+  static const bgTop = Color(0xFFF3FAFF);
+  static const bgMid = Color(0xFFE8F4FD);
+  static const bgBottom = Color(0xFFFFFFFF);
+
+  static const cardGlass = Color(0xFFFFFFFF);
+  static const cardGlassLight = Color(0xFFF3F1FB);
+  static const cardBorder = Color(0xFFE7E4F6);
+
+  static const textPrimary = Color(0xFF1E1B3A);
+  static const textSecondary = Color(0xFF6B6890);
+  static const textMuted = Color(0xFF9490B8);
+
+  static const neonCyan = Color(0xFF15AEDB);
+  static const neonBlue = Color(0xFF4E6BFF);
+  static const neonViolet = Color(0xFF7C5CFF);
+  static const neonPink = Color(0xFFE24E90);
+  static const neonGold = Color(0xFFDB9A2C);
+
+  static const danger = Color(0xFFE0435F);
+  static const dangerBg = Color(0xFFFCE7EC);
+}
+
+// ============================================================
+// SETTINGS SCREEN — same state/logic as the original file.
 // ============================================================
 
 class SettingsScreen extends StatefulWidget {
@@ -20,7 +68,6 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-// ✅ Step 4: Added AutomaticKeepAliveClientMixin
 class _SettingsScreenState extends State<SettingsScreen>
     with AutomaticKeepAliveClientMixin {
   String _language = 'English';
@@ -68,7 +115,7 @@ class _SettingsScreenState extends State<SettingsScreen>
         title: 'Logout',
         message: 'Are you sure you want to logout?',
         confirmLabel: 'Logout',
-        confirmColor: AppTheme.danger,
+        confirmColor: _Palette.danger,
         onConfirm: () => _logout(context),
       ),
     );
@@ -89,7 +136,7 @@ class _SettingsScreenState extends State<SettingsScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error logging out: $e'),
-            backgroundColor: AppTheme.danger,
+            backgroundColor: _Palette.danger,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -111,7 +158,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('$label coming soon'),
-        backgroundColor: const Color(0xFF201E4A),
+        backgroundColor: _Palette.neonViolet,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
@@ -126,118 +173,153 @@ class _SettingsScreenState extends State<SettingsScreen>
     );
   }
 
-  // ✅ Step 2: Removed _handleBack() method completely
-
   @override
-  bool get wantKeepAlive => true; // ✅ Step 4: Keep page alive
+  bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // ✅ Step 5: Call super.build
+    super.build(context);
 
-    // ✅ Steps 1 & 3: Import removed, bottom bar removed
     return Scaffold(
-      backgroundColor: AppTheme.backgroundGradient.first,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: AppTheme.backgroundGradient,
-          ),
-        ),
-        child: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              // ✅ Step 6: Updated TopBar with inline back logic
-              _TopBar(
-                onBack: () {
-                  if (Navigator.canPop(context)) {
-                    Navigator.pop(context);
-                  }
-                },
-              ),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                  child: Column(
-                    children: [
-                      _SettingsSection(
-                        title: 'Account',
-                        children: [
-                          _SettingsTile(
-                            icon: Icons.person_outline_rounded,
-                            title: 'My Profile',
-                            onTap: _navigateToProfile,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _SettingsSection(
-                        title: 'Preferences',
-                        children: [
-                          _SettingsTile(
-                            icon: Icons.language_rounded,
-                            title: 'Language',
-                            trailing: _language,
-                            onTap: _showLanguageSelector,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _SettingsSection(
-                        title: 'Support',
-                        children: [
-                          _SettingsTile(
-                            icon: Icons.help_outline_rounded,
-                            title: 'Help Center',
-                            onTap: () => _showComingSoon('Help Center'),
-                          ),
-                          _SettingsTile(
-                            icon: Icons.privacy_tip_outlined,
-                            title: 'Privacy Policy',
-                            onTap: () => _showComingSoon('Privacy Policy'),
-                          ),
-                          _SettingsTile(
-                            icon: Icons.description_outlined,
-                            title: 'Terms & Conditions',
-                            onTap: () => _showComingSoon('Terms & Conditions'),
-                          ),
-                          _SettingsTile(
-                            icon: Icons.info_outline_rounded,
-                            title: 'About QuizLanka AI',
-                            onTap: _showAbout,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-                      _LogoutButton(onTap: _showLogoutDialog),
-                      const SizedBox(height: 20),
-                      const Center(
-                        child: Text(
-                          'Version 1.0.0',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
+      backgroundColor: _Palette.bgTop,
+      body: Stack(
+        children: [
+          const Positioned.fill(child: _SettingsBackground()),
+          SafeArea(
+            child: Column(
+              children: [
+                _TopBar(
+                  onBack: () {
+                    if (Navigator.canPop(context)) {
+                      Navigator.pop(context);
+                    }
+                  },
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                    child: Column(
+                      children: [
+                        _SettingsSection(
+                          title: 'Account',
+                          children: [
+                            _SettingsTile(
+                              icon: Icons.person_outline_rounded,
+                              title: 'My Profile',
+                              onTap: _navigateToProfile,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        _SettingsSection(
+                          title: 'Preferences',
+                          children: [
+                            _SettingsTile(
+                              icon: Icons.language_rounded,
+                              title: 'Language',
+                              trailing: _language,
+                              onTap: _showLanguageSelector,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        _SettingsSection(
+                          title: 'Support',
+                          children: [
+                            _SettingsTile(
+                              icon: Icons.help_outline_rounded,
+                              title: 'Help Center',
+                              onTap: () => _showComingSoon('Help Center'),
+                            ),
+                            _SettingsTile(
+                              icon: Icons.privacy_tip_outlined,
+                              title: 'Privacy Policy',
+                              onTap: () => _showComingSoon('Privacy Policy'),
+                            ),
+                            _SettingsTile(
+                              icon: Icons.description_outlined,
+                              title: 'Terms & Conditions',
+                              onTap: () =>
+                                  _showComingSoon('Terms & Conditions'),
+                            ),
+                            _SettingsTile(
+                              icon: Icons.info_outline_rounded,
+                              title: 'About QuizLanka AI',
+                              onTap: _showAbout,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        _LogoutButton(onTap: _showLogoutDialog),
+                        const SizedBox(height: 20),
+                        const Center(
+                          child: Text(
+                            'Version 1.0.0',
+                            style: TextStyle(
+                              color: _Palette.textMuted,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
 // ============================================================
-// 3. TOP BAR
+// BACKGROUND — same light wash + optional bg image as
+// ProfileScreen, kept subtler here since this is a utility screen.
+// ============================================================
+class _SettingsBackground extends StatelessWidget {
+  const _SettingsBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Opacity(
+            opacity: 0.10,
+            child: Image.asset(
+              'assets/profile_bg.png',
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) =>
+                  const SizedBox.shrink(),
+            ),
+          ),
+        ),
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  _Palette.neonCyan.withValues(alpha: 0.10),
+                  _Palette.bgMid.withValues(alpha: 0.65),
+                  Colors.white.withValues(alpha: 0.85),
+                ],
+                stops: const [0.0, 0.55, 1.0],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================
+// TOP BAR
 // ============================================================
 class _TopBar extends StatelessWidget {
   const _TopBar({required this.onBack});
@@ -257,16 +339,22 @@ class _TopBar extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.08),
+                color: _Palette.cardGlass,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                border: Border.all(color: _Palette.cardBorder),
+                boxShadow: [
+                  BoxShadow(
+                    color: _Palette.neonViolet.withValues(alpha: 0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Icon(
-                // ✅ Step 7: Updated icon to show settings icon when no back
                 canPop
                     ? Icons.arrow_back_ios_new_rounded
                     : Icons.settings_rounded,
-                color: Colors.white,
+                color: _Palette.textPrimary,
                 size: 18,
               ),
             ),
@@ -277,7 +365,7 @@ class _TopBar extends StatelessWidget {
             style: TextStyle(
               fontSize: 19,
               fontWeight: FontWeight.w800,
-              color: AppTheme.textPrimary,
+              color: _Palette.textPrimary,
             ),
           ),
         ],
@@ -287,7 +375,49 @@ class _TopBar extends StatelessWidget {
 }
 
 // ============================================================
-// 4. SETTINGS SECTION
+// GLASS CARD — shared visual language with ProfileScreen
+// ============================================================
+class _GlassCard extends StatelessWidget {
+  const _GlassCard({required this.child, this.padding, this.radius = 16});
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          width: double.infinity,
+          padding: padding,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(radius),
+            color: _Palette.cardGlass.withValues(alpha: 0.85),
+            border: Border.all(color: _Palette.cardBorder),
+            boxShadow: [
+              BoxShadow(
+                color: _Palette.neonViolet.withValues(alpha: 0.06),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// SETTINGS SECTION
 // ============================================================
 class _SettingsSection extends StatelessWidget {
   final String title;
@@ -305,29 +435,23 @@ class _SettingsSection extends StatelessWidget {
           child: Text(
             title.toUpperCase(),
             style: const TextStyle(
-              color: AppTheme.textSecondary,
+              color: _Palette.textSecondary,
               fontSize: 12,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.5,
             ),
           ),
         ),
-        Container(
-          decoration: AppTheme.glassCard(radius: 16),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Column(
-              children: [
-                for (int i = 0; i < children.length; i++) ...[
-                  children[i],
-                  if (i != children.length - 1)
-                    Divider(
-                      height: 1,
-                      color: Colors.white.withValues(alpha: 0.08),
-                    ),
-                ],
+        _GlassCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            children: [
+              for (int i = 0; i < children.length; i++) ...[
+                children[i],
+                if (i != children.length - 1)
+                  const Divider(height: 1, color: _Palette.cardBorder),
               ],
-            ),
+            ],
           ),
         ),
       ],
@@ -336,7 +460,7 @@ class _SettingsSection extends StatelessWidget {
 }
 
 // ============================================================
-// 5. SETTINGS TILE
+// SETTINGS TILE
 // ============================================================
 class _SettingsTile extends StatelessWidget {
   final IconData icon;
@@ -363,17 +487,17 @@ class _SettingsTile extends StatelessWidget {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: AppTheme.violet.withValues(alpha: 0.16),
+                color: _Palette.neonViolet.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(icon, color: AppTheme.violet, size: 19),
+              child: Icon(icon, color: _Palette.neonViolet, size: 19),
             ),
             const SizedBox(width: 14),
             Expanded(
               child: Text(
                 title,
                 style: const TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: _Palette.textPrimary,
                   fontSize: 15,
                   fontWeight: FontWeight.w500,
                 ),
@@ -383,7 +507,7 @@ class _SettingsTile extends StatelessWidget {
               Text(
                 trailing!,
                 style: const TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: _Palette.textSecondary,
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
                 ),
@@ -391,7 +515,7 @@ class _SettingsTile extends StatelessWidget {
             const SizedBox(width: 8),
             const Icon(
               Icons.chevron_right_rounded,
-              color: AppTheme.textSecondary,
+              color: _Palette.textMuted,
               size: 20,
             ),
           ],
@@ -402,7 +526,7 @@ class _SettingsTile extends StatelessWidget {
 }
 
 // ============================================================
-// 6. LOGOUT BUTTON
+// LOGOUT BUTTON
 // ============================================================
 class _LogoutButton extends StatelessWidget {
   const _LogoutButton({required this.onTap});
@@ -413,9 +537,9 @@ class _LogoutButton extends StatelessWidget {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: AppTheme.danger.withValues(alpha: 0.1),
+        color: _Palette.dangerBg,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.danger.withValues(alpha: 0.3)),
+        border: Border.all(color: _Palette.danger.withValues(alpha: 0.3)),
       ),
       child: Material(
         color: Colors.transparent,
@@ -427,12 +551,12 @@ class _LogoutButton extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.logout_rounded, color: AppTheme.danger, size: 22),
+                Icon(Icons.logout_rounded, color: _Palette.danger, size: 22),
                 SizedBox(width: 10),
                 Text(
                   'Logout',
                   style: TextStyle(
-                    color: AppTheme.danger,
+                    color: _Palette.danger,
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
                   ),
@@ -447,7 +571,7 @@ class _LogoutButton extends StatelessWidget {
 }
 
 // ============================================================
-// 7. CONFIRM DIALOG (used for Logout)
+// CONFIRM DIALOG (used for Logout)
 // ============================================================
 class _ConfirmDialog extends StatelessWidget {
   const _ConfirmDialog({
@@ -471,9 +595,16 @@ class _ConfirmDialog extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: const Color(0xFF201E4A),
+          color: _Palette.cardGlass,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          border: Border.all(color: _Palette.cardBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.10),
+              blurRadius: 24,
+              offset: const Offset(0, 10),
+            ),
+          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -484,14 +615,14 @@ class _ConfirmDialog extends StatelessWidget {
               style: const TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 20,
-                color: AppTheme.textPrimary,
+                color: _Palette.textPrimary,
               ),
             ),
             const SizedBox(height: 10),
             Text(
               message,
               style: const TextStyle(
-                color: AppTheme.textSecondary,
+                color: _Palette.textSecondary,
                 fontSize: 14,
                 height: 1.5,
               ),
@@ -503,7 +634,7 @@ class _ConfirmDialog extends StatelessWidget {
                 TextButton(
                   onPressed: () => Navigator.pop(context, false),
                   style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.textSecondary,
+                    foregroundColor: _Palette.textSecondary,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
                       vertical: 12,
@@ -549,7 +680,7 @@ class _ConfirmDialog extends StatelessWidget {
 }
 
 // ============================================================
-// 8. ABOUT DIALOG
+// ABOUT DIALOG
 // ============================================================
 class _AboutDialog extends StatelessWidget {
   const _AboutDialog();
@@ -561,9 +692,16 @@ class _AboutDialog extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: const Color(0xFF201E4A),
+          color: _Palette.cardGlass,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          border: Border.all(color: _Palette.cardBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.10),
+              blurRadius: 24,
+              offset: const Offset(0, 10),
+            ),
+          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -574,12 +712,12 @@ class _AboutDialog extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppTheme.violet.withValues(alpha: 0.18),
+                    color: _Palette.neonViolet.withValues(alpha: 0.14),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Icon(
                     Icons.psychology_alt_rounded,
-                    color: AppTheme.violet,
+                    color: _Palette.neonViolet,
                     size: 28,
                   ),
                 ),
@@ -589,7 +727,7 @@ class _AboutDialog extends StatelessWidget {
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 20,
-                    color: AppTheme.textPrimary,
+                    color: _Palette.textPrimary,
                   ),
                 ),
               ],
@@ -597,13 +735,13 @@ class _AboutDialog extends StatelessWidget {
             const SizedBox(height: 16),
             const Text(
               'Version 1.0.0',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              style: TextStyle(color: _Palette.textSecondary, fontSize: 14),
             ),
             const SizedBox(height: 12),
             const Text(
               'AI-powered quiz platform for Sri Lankan students.',
               style: TextStyle(
-                color: AppTheme.textSecondary,
+                color: _Palette.textSecondary,
                 fontSize: 14,
                 height: 1.5,
               ),
@@ -620,7 +758,7 @@ class _AboutDialog extends StatelessWidget {
               child: TextButton(
                 onPressed: () => Navigator.pop(context),
                 style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.violet,
+                  foregroundColor: _Palette.neonViolet,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
                     vertical: 12,
@@ -641,11 +779,11 @@ class _AboutDialog extends StatelessWidget {
   Widget _aboutItem(IconData icon, String text) {
     return Row(
       children: [
-        Icon(icon, size: 16, color: AppTheme.textSecondary),
+        Icon(icon, size: 16, color: _Palette.textSecondary),
         const SizedBox(width: 8),
         Text(
           text,
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          style: const TextStyle(color: _Palette.textSecondary, fontSize: 13),
         ),
       ],
     );
@@ -653,7 +791,7 @@ class _AboutDialog extends StatelessWidget {
 }
 
 // ============================================================
-// 9. LANGUAGE SELECTOR
+// LANGUAGE SELECTOR
 // ============================================================
 class _LanguageSelector extends StatelessWidget {
   final String currentLanguage;
@@ -675,7 +813,7 @@ class _LanguageSelector extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: const BoxDecoration(
-        color: Color(0xFF14132F),
+        color: _Palette.cardGlass,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
@@ -687,7 +825,7 @@ class _LanguageSelector extends StatelessWidget {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary,
+              color: _Palette.textPrimary,
             ),
           ),
           const SizedBox(height: 16),
@@ -707,8 +845,8 @@ class _LanguageSelector extends StatelessWidget {
                         shape: BoxShape.circle,
                         border: Border.all(
                           color: isSelected
-                              ? AppTheme.violet
-                              : Colors.white.withValues(alpha: 0.24),
+                              ? _Palette.neonViolet
+                              : _Palette.cardBorder,
                           width: 2,
                         ),
                       ),
@@ -718,7 +856,7 @@ class _LanguageSelector extends StatelessWidget {
                                 width: 10,
                                 height: 10,
                                 decoration: const BoxDecoration(
-                                  color: AppTheme.violet,
+                                  color: _Palette.neonViolet,
                                   shape: BoxShape.circle,
                                 ),
                               ),
@@ -730,8 +868,8 @@ class _LanguageSelector extends StatelessWidget {
                       lang['name']!,
                       style: TextStyle(
                         color: isSelected
-                            ? AppTheme.violet
-                            : AppTheme.textPrimary,
+                            ? _Palette.neonViolet
+                            : _Palette.textPrimary,
                         fontWeight: isSelected
                             ? FontWeight.w700
                             : FontWeight.w500,
@@ -749,7 +887,7 @@ class _LanguageSelector extends StatelessWidget {
             child: TextButton(
               onPressed: () => Navigator.pop(context),
               style: TextButton.styleFrom(
-                foregroundColor: AppTheme.textSecondary,
+                foregroundColor: _Palette.textSecondary,
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),

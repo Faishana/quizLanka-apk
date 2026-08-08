@@ -6,7 +6,6 @@ import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:quiz_lanka/Login.dart'; // LoginScreen + AuthProvider
 import 'package:quiz_lanka/config/api_config.dart';
-import 'package:quiz_lanka/dashboard.dart';
 import 'package:quiz_lanka/main_navigation.dart';
 
 // ============================================================

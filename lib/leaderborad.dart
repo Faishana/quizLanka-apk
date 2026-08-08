@@ -10,7 +10,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ============================================================
-// 2. MODELS — unchanged
+// 2. MODELS — with debug prints
 // ============================================================
 class LeaderboardResponse {
   final bool success;
@@ -32,6 +32,10 @@ class LeaderboardResponse {
   });
 
   factory LeaderboardResponse.fromJson(Map<String, dynamic> json) {
+    debugPrint("========== LEADERBOARD RESPONSE ==========");
+    debugPrint("Full Response: ${jsonEncode(json)}");
+    debugPrint("==========================================");
+
     return LeaderboardResponse(
       success: json['success'] ?? false,
       myRank: json['my_rank'] != null && json['my_rank'].isNotEmpty
@@ -115,9 +119,13 @@ class LeaderboardPlayer {
   });
 
   factory LeaderboardPlayer.fromJson(Map<String, dynamic> json) {
+    // Debug print for avatar
+    debugPrint("Leaderboard Player Avatar: ${json['avatar']}");
+    debugPrint("Leaderboard Player Name: ${json['name']}");
+
     return LeaderboardPlayer(
       rank: json['rank'] ?? 0,
-      id: json['id'] ?? '',
+      id: json['id']?.toString() ?? '',
       name: json['name'] ?? '',
       avatar: json['avatar'] ?? '',
       xp: json['xp'] ?? 0,
@@ -142,13 +150,17 @@ class SubjectStat {
 }
 
 // ============================================================
-// 3. API SERVICE — unchanged
+// 3. API SERVICE
 // ============================================================
 class LeaderboardService {
   Future<LeaderboardResponse> fetchLeaderboard() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
+
+      debugPrint("========== FETCHING LEADERBOARD ==========");
+      debugPrint("URL: ${ApiConfig.baseUrl}${ApiConfig.leaderboard}");
+      debugPrint("Token: ${token != null ? 'Present' : 'Missing'}");
 
       final response = await http.get(
         Uri.parse('${ApiConfig.baseUrl}${ApiConfig.leaderboard}'),
@@ -158,6 +170,10 @@ class LeaderboardService {
         },
       );
 
+      debugPrint("Response Status: ${response.statusCode}");
+      debugPrint("Response Body: ${response.body}");
+      debugPrint("==========================================");
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return LeaderboardResponse.fromJson(data);
@@ -165,13 +181,82 @@ class LeaderboardService {
         throw Exception('Failed to load leaderboard: ${response.statusCode}');
       }
     } catch (e) {
+      debugPrint("Error fetching leaderboard: $e");
       throw Exception('Error fetching leaderboard: $e');
     }
   }
 }
 
 // ============================================================
-// 4. LEADERBOARD SCREEN — updated with KeepAlive, removed bottom bar
+// 4. CUSTOM AVATAR WIDGET — Reusable with error handling
+// ============================================================
+class _AvatarWidget extends StatelessWidget {
+  final String avatarUrl;
+  final double size;
+  final Color? borderColor;
+  final double borderWidth;
+
+  const _AvatarWidget({
+    required this.avatarUrl,
+    this.size = 40,
+    this.borderColor,
+    this.borderWidth = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasValidAvatar = avatarUrl.trim().isNotEmpty;
+
+    debugPrint("AvatarWidget - URL: '$avatarUrl'");
+    debugPrint("AvatarWidget - Has Valid Avatar: $hasValidAvatar");
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: AppTheme.violet.withValues(alpha: 0.18),
+        border: borderColor != null
+            ? Border.all(color: borderColor!, width: borderWidth)
+            : null,
+      ),
+      child: hasValidAvatar
+          ? ClipOval(
+              child: Image.network(
+                avatarUrl.trim(),
+                fit: BoxFit.cover,
+                width: size,
+                height: size,
+                errorBuilder: (context, error, stackTrace) {
+                  debugPrint("Error loading avatar: $error");
+                  return Icon(
+                    Icons.person,
+                    color: AppTheme.violet,
+                    size: size * 0.5,
+                  );
+                },
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Center(
+                    child: SizedBox(
+                      width: size * 0.4,
+                      height: size * 0.4,
+                      child: const CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppTheme.violet,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            )
+          : Icon(Icons.person, color: AppTheme.violet, size: size * 0.5),
+    );
+  }
+}
+
+// ============================================================
+// 5. LEADERBOARD SCREEN
 // ============================================================
 class LeaderboardScreen extends StatefulWidget {
   const LeaderboardScreen({super.key});
@@ -180,7 +265,6 @@ class LeaderboardScreen extends StatefulWidget {
   State<LeaderboardScreen> createState() => _LeaderboardScreenState();
 }
 
-// ✅ Step 5: Added AutomaticKeepAliveClientMixin
 class _LeaderboardScreenState extends State<LeaderboardScreen>
     with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   late TabController _tabController;
@@ -222,16 +306,13 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
     }
   }
 
-  // ✅ Step 3: Removed _handleBack() method completely
-
   @override
-  bool get wantKeepAlive => true; // ✅ Step 5: Keep page alive
+  bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // ✅ Step 5: Call super.build
+    super.build(context);
 
-    // ✅ Steps 1 & 2: Bottom bar removed, import removed
     return Scaffold(
       backgroundColor: AppTheme.backgroundGradient.first,
       body: Container(
@@ -258,7 +339,6 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
               bottom: false,
               child: Column(
                 children: [
-                  // ✅ Step 4: Updated Header with inline back logic
                   _Header(
                     onBack: () {
                       if (Navigator.canPop(context)) {
@@ -293,6 +373,13 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
   Widget _buildContent() {
     if (_data == null) return const SizedBox();
 
+    debugPrint("========== BUILDING CONTENT ==========");
+    debugPrint("Top Three Count: ${_data!.topThree.length}");
+    debugPrint("National Count: ${_data!.national.length}");
+    debugPrint("School Count: ${_data!.school.length}");
+    debugPrint("District Count: ${_data!.district.length}");
+    debugPrint("======================================");
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
       physics: const BouncingScrollPhysics(),
@@ -320,11 +407,11 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
 }
 
 // ============================================================
-// 5. WIDGETS
+// 6. WIDGETS
 // ============================================================
 
 // ------------------------------------------------------------
-// 5.0 Ambient glow blob
+// 6.0 Ambient glow blob
 // ------------------------------------------------------------
 class _GlowBlob extends StatelessWidget {
   const _GlowBlob({required this.color, required this.size});
@@ -347,7 +434,7 @@ class _GlowBlob extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// 5.1 Header — simplified, only checks canPop
+// 6.1 Header
 // ------------------------------------------------------------
 class _Header extends StatelessWidget {
   const _Header({required this.onBack, required this.onRefresh});
@@ -409,7 +496,7 @@ class _CircleIconButton extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// 5.1b Error Widget
+// 6.1b Error Widget
 // ------------------------------------------------------------
 class _ErrorWidget extends StatelessWidget {
   const _ErrorWidget({required this.error, required this.onRetry});
@@ -486,7 +573,7 @@ class _ErrorWidget extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// 5.2 My Rank — hero gradient banner (was a flat glass card)
+// 6.2 My Rank
 // ------------------------------------------------------------
 class _MyRankHero extends StatelessWidget {
   final MyRank rank;
@@ -642,7 +729,7 @@ class _MyRankHero extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// 5.3 Podium — staggered bars instead of three equal columns
+// 6.3 Podium — with updated avatar
 // ------------------------------------------------------------
 class _Podium extends StatelessWidget {
   final List<LeaderboardPlayer> players;
@@ -655,6 +742,15 @@ class _Podium extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint("========== PODIUM BUILD ==========");
+    debugPrint("Players count: ${players.length}");
+    players.forEach((p) {
+      debugPrint(
+        "Player: ${p.name}, Avatar: '${p.avatar}', Avatar Empty: ${p.avatar.isEmpty}",
+      );
+    });
+    debugPrint("==================================");
+
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
       decoration: AppTheme.glassCard(radius: 24),
@@ -705,23 +801,11 @@ class _Podium extends StatelessWidget {
       children: [
         Text(medal, style: const TextStyle(fontSize: 26)),
         const SizedBox(height: 6),
-        Container(
-          width: avatarSize,
-          height: avatarSize,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: medalColor, width: 2.5),
-            color: medalColor.withValues(alpha: 0.18),
-            image: player.avatar.isNotEmpty
-                ? DecorationImage(
-                    image: NetworkImage(player.avatar),
-                    fit: BoxFit.cover,
-                  )
-                : null,
-          ),
-          child: player.avatar.isEmpty
-              ? Icon(Icons.person, color: medalColor, size: avatarSize * 0.5)
-              : null,
+        _AvatarWidget(
+          avatarUrl: player.avatar,
+          size: avatarSize,
+          borderColor: medalColor,
+          borderWidth: 2.5,
         ),
         const SizedBox(height: 8),
         SizedBox(
@@ -775,7 +859,7 @@ class _Podium extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// 5.4 Category Tabs
+// 6.4 Category Tabs
 // ------------------------------------------------------------
 class _CategoryTabs extends StatelessWidget {
   final TabController tabController;
@@ -815,7 +899,7 @@ class _CategoryTabs extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// 5.5 Leaderboard List
+// 6.5 Leaderboard List
 // ------------------------------------------------------------
 class _LeaderboardList extends StatelessWidget {
   final List<LeaderboardPlayer> players;
@@ -824,6 +908,14 @@ class _LeaderboardList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint("========== LEADERBOARD LIST ==========");
+    debugPrint("Players count: ${players.length}");
+    if (players.isNotEmpty) {
+      debugPrint("First player avatar: '${players.first.avatar}'");
+      debugPrint("First player avatar empty: ${players.first.avatar.isEmpty}");
+    }
+    debugPrint("======================================");
+
     if (players.isEmpty) {
       return const Center(
         child: Text(
@@ -842,7 +934,7 @@ class _LeaderboardList extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// 5.6 Player Tile
+// 6.6 Player Tile — with updated avatar
 // ------------------------------------------------------------
 class _PlayerTile extends StatelessWidget {
   final LeaderboardPlayer player;
@@ -852,6 +944,8 @@ class _PlayerTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isTopThree = player.rank <= 3;
+
+    debugPrint("Player Tile - ${player.name}: Avatar '${player.avatar}'");
 
     return Hero(
       tag: 'player_${player.id}',
@@ -884,23 +978,7 @@ class _PlayerTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppTheme.violet.withValues(alpha: 0.18),
-                shape: BoxShape.circle,
-                image: player.avatar.isNotEmpty
-                    ? DecorationImage(
-                        image: NetworkImage(player.avatar),
-                        fit: BoxFit.cover,
-                      )
-                    : null,
-              ),
-              child: player.avatar.isEmpty
-                  ? const Icon(Icons.person, color: AppTheme.violet, size: 20)
-                  : null,
-            ),
+            _AvatarWidget(avatarUrl: player.avatar, size: 40),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

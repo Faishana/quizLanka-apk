@@ -2,6 +2,7 @@
 // ============================================================
 // Screen shown after a subject is picked on SubjectsScreen.
 // Lets the student choose Easy / Medium / Hard, then starts the quiz.
+// Light theme: blue -> white transparent background.
 // ============================================================
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -23,6 +24,14 @@ class DifficultyScreen extends StatefulWidget {
 
 class _DifficultyScreenState extends State<DifficultyScreen> {
   bool _isStarting = false;
+
+  // Light theme palette (local to this screen so we don't have to
+  // touch AppTheme globally).
+  static const Color _lightBgTop = Color(0xFFEAF3FF); // soft blue
+  static const Color _lightBgBottom = Color(0xFFFFFFFF); // white
+  static const Color _lightTextPrimary = Color(0xFF12213B);
+  static const Color _lightTextSecondary = Color(0xFF5A6B85);
+  static const Color _accentBlue = Color(0xFF3B82F6);
 
   // Helper method to find questions deeply in response — same logic
   // as the old subjects_screen implementation.
@@ -173,17 +182,18 @@ class _DifficultyScreenState extends State<DifficultyScreen> {
     final color = subject.flutterColor;
 
     return Scaffold(
-      backgroundColor: AppTheme.backgroundGradient.first,
+      backgroundColor: _lightBgBottom,
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: AppTheme.backgroundGradient,
+            colors: [_lightBgTop, _lightBgBottom],
           ),
         ),
         child: Stack(
           children: [
+            // Soft blue glow, top-right
             Positioned(
               top: -70,
               right: -50,
@@ -194,8 +204,26 @@ class _DifficultyScreenState extends State<DifficultyScreen> {
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
                     colors: [
-                      color.withValues(alpha: 0.35),
-                      color.withValues(alpha: 0.0),
+                      _accentBlue.withValues(alpha: 0.20),
+                      _accentBlue.withValues(alpha: 0.0),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // Extra soft glow, bottom-left, for a layered transparent feel
+            Positioned(
+              bottom: -60,
+              left: -60,
+              child: Container(
+                width: 200,
+                height: 200,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      _accentBlue.withValues(alpha: 0.12),
+                      _accentBlue.withValues(alpha: 0.0),
                     ],
                   ),
                 ),
@@ -215,7 +243,7 @@ class _DifficultyScreenState extends State<DifficultyScreen> {
                           const Text(
                             'Select Difficulty',
                             style: TextStyle(
-                              color: AppTheme.textPrimary,
+                              color: _lightTextPrimary,
                               fontSize: 18,
                               fontWeight: FontWeight.w800,
                             ),
@@ -224,7 +252,7 @@ class _DifficultyScreenState extends State<DifficultyScreen> {
                           const Text(
                             'Choose a level that matches your confidence',
                             style: TextStyle(
-                              color: AppTheme.textSecondary,
+                              color: _lightTextSecondary,
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
                             ),
@@ -279,6 +307,10 @@ class _TopBar extends StatelessWidget {
 
   const _TopBar({required this.subject, required this.color});
 
+  static const Color _accentBlue = Color(0xFF3B82F6);
+  static const Color _lightTextPrimary = Color(0xFF12213B);
+  static const Color _lightTextSecondary = Color(0xFF5A6B85);
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -293,13 +325,20 @@ class _TopBar extends StatelessWidget {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.08),
+                color: Colors.white.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(13),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                border: Border.all(color: _accentBlue.withValues(alpha: 0.20)),
+                boxShadow: [
+                  BoxShadow(
+                    color: _accentBlue.withValues(alpha: 0.08),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: const Icon(
                 Icons.arrow_back_ios_new_rounded,
-                color: Colors.white,
+                color: _lightTextPrimary,
                 size: 18,
               ),
             ),
@@ -318,14 +357,14 @@ class _TopBar extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
-                    color: AppTheme.textPrimary,
+                    color: _lightTextPrimary,
                   ),
                 ),
                 const SizedBox(height: 2),
                 const Text(
                   'Ready when you are',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: _lightTextSecondary,
                     fontSize: 12.5,
                     fontWeight: FontWeight.w500,
                   ),
@@ -340,7 +379,7 @@ class _TopBar extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Difficulty option card
+// Difficulty option card — light glassy blue/white style
 // ------------------------------------------------------------
 class _DifficultyCard extends StatelessWidget {
   final String label;
@@ -359,6 +398,8 @@ class _DifficultyCard extends StatelessWidget {
     required this.onTap,
   });
 
+  static const Color _lightTextSecondary = Color(0xFF5A6B85);
+
   @override
   Widget build(BuildContext context) {
     return Opacity(
@@ -373,11 +414,21 @@ class _DifficultyCard extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                Colors.white.withValues(alpha: 0.07),
-                color.withValues(alpha: 0.07),
+                Colors.white.withValues(alpha: 0.75),
+                color.withValues(alpha: 0.08),
               ],
             ),
-            border: Border.all(color: color.withValues(alpha: 0.35), width: 1.2),
+            border: Border.all(
+              color: color.withValues(alpha: 0.30),
+              width: 1.2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.10),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
           child: Row(
             children: [
@@ -385,7 +436,7 @@ class _DifficultyCard extends StatelessWidget {
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.18),
+                  color: color.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(15),
                 ),
                 child: Icon(icon, color: color, size: 26),
@@ -407,7 +458,7 @@ class _DifficultyCard extends StatelessWidget {
                     Text(
                       subtitle,
                       style: const TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: _lightTextSecondary,
                         fontSize: 12.5,
                         fontWeight: FontWeight.w500,
                         height: 1.3,
@@ -421,7 +472,7 @@ class _DifficultyCard extends StatelessWidget {
                 width: 34,
                 height: 34,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.18),
+                  color: color.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
@@ -439,36 +490,49 @@ class _DifficultyCard extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// "Starting quiz…" dialog
+// "Starting quiz…" dialog — light card on translucent white
 // ------------------------------------------------------------
 class _StartingQuizDialog extends StatelessWidget {
   const _StartingQuizDialog();
 
+  static const Color _accentBlue = Color(0xFF3B82F6);
+  static const Color _lightTextPrimary = Color(0xFF12213B);
+
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 60),
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: const Color(0xFF201E4A),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-        ),
-        child: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: AppTheme.violet, strokeWidth: 2.5),
-            SizedBox(height: 16),
-            Text(
-              'Starting quiz...',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
+    return Container(
+      color: Colors.white.withValues(alpha: 0.35),
+      child: Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 60),
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.92),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _accentBlue.withValues(alpha: 0.20)),
+            boxShadow: [
+              BoxShadow(
+                color: _accentBlue.withValues(alpha: 0.15),
+                blurRadius: 24,
+                offset: const Offset(0, 10),
               ),
-            ),
-          ],
+            ],
+          ),
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: _accentBlue, strokeWidth: 2.5),
+              SizedBox(height: 16),
+              Text(
+                'Starting quiz...',
+                style: TextStyle(
+                  color: _lightTextPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

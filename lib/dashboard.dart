@@ -15,12 +15,6 @@ import 'package:quiz_lanka/subjects_screen.dart';
 
 // ============================================================
 // 2. MODELS
-// ------------------------------------------------------------
-// Same shape as before, with a few *additive, nullable* fields
-// so the richer reference UI (streak, notifications, time-left,
-// AI recommendation copy) can render when the API provides them
-// and gracefully fall back / hide when it doesn't. Nothing that
-// already existed was renamed or made required.
 // ============================================================
 
 class Grade {
@@ -54,15 +48,48 @@ class User {
     this.avatarUrl,
   });
 
-  factory User.fromJson(Map<String, dynamic> json) => User(
-    id: json['id'] as int,
-    name: json['name'] as String,
-    email: json['email'] as String,
-    school: json['school'] as String,
-    district: json['district'] as String,
-    grade: Grade.fromJson(json['grade'] as Map<String, dynamic>),
-    avatarUrl: json['avatar_url'] as String?,
-  );
+  factory User.fromJson(Map<String, dynamic> json) {
+    // Debug prints to see what's coming from backend
+    debugPrint("========== USER FROM JSON ==========");
+    debugPrint("avatar_url: ${json['avatar_url']}");
+    debugPrint("profile_image: ${json['profile_image']}");
+    debugPrint("display_avatar: ${json['display_avatar']}");
+    debugPrint("avatar: ${json['avatar']}");
+    debugPrint("profile_photo: ${json['profile_photo']}");
+    debugPrint("====================================");
+
+    // Try multiple possible field names
+    String? avatarUrl;
+
+    if (json['display_avatar'] != null &&
+        json['display_avatar'].toString().isNotEmpty) {
+      avatarUrl = json['display_avatar'].toString();
+    } else if (json['profile_image'] != null &&
+        json['profile_image'].toString().isNotEmpty) {
+      avatarUrl = json['profile_image'].toString();
+    } else if (json['avatar_url'] != null &&
+        json['avatar_url'].toString().isNotEmpty) {
+      avatarUrl = json['avatar_url'].toString();
+    } else if (json['avatar'] != null && json['avatar'].toString().isNotEmpty) {
+      avatarUrl = json['avatar'].toString();
+    } else if (json['profile_photo'] != null &&
+        json['profile_photo'].toString().isNotEmpty) {
+      avatarUrl = json['profile_photo'].toString();
+    }
+
+    debugPrint("Selected Avatar URL: $avatarUrl");
+    debugPrint("====================================");
+
+    return User(
+      id: json['id'] as int,
+      name: json['name'] as String,
+      email: json['email'] as String,
+      school: json['school'] as String,
+      district: json['district'] as String,
+      grade: Grade.fromJson(json['grade'] as Map<String, dynamic>),
+      avatarUrl: avatarUrl,
+    );
+  }
 }
 
 class Stats {
@@ -70,8 +97,8 @@ class Stats {
   final int completedQuizzes;
   final double averageScore;
   final int? xpPoints;
-  final int? streakDays; // NEW — optional, powers the 🔥 chip
-  final int? notificationsCount; // NEW — optional, powers the bell badge
+  final int? streakDays;
+  final int? notificationsCount;
 
   Stats({
     required this.selectedSubjects,
@@ -131,8 +158,8 @@ class ContinueLearning {
   final int lastScore;
   final double lastPercentage;
   final String completedAt;
-  final int? recommendedQuizCount; // NEW — "AI recommends N quizzes..."
-  final int? minutesLeft; // NEW — "25 min left" chip
+  final int? recommendedQuizCount;
+  final int? minutesLeft;
 
   ContinueLearning({
     required this.quizId,
@@ -201,6 +228,10 @@ class DashboardModel {
   });
 
   factory DashboardModel.fromJson(Map<String, dynamic> json) {
+    debugPrint("========== DASHBOARD RESPONSE ==========");
+    debugPrint("Full Response: ${jsonEncode(json)}");
+    debugPrint("========================================");
+
     return DashboardModel(
       success: json['success'] as bool,
       user: User.fromJson(json['user'] as Map<String, dynamic>),
@@ -221,7 +252,7 @@ class DashboardModel {
 }
 
 // ============================================================
-// 3. SERVICE — UNCHANGED (do not modify)
+// 3. SERVICE
 // ============================================================
 
 class DashboardService {
@@ -281,25 +312,14 @@ class DashboardService {
 }
 
 // ============================================================
-// 4. DESIGN TOKENS — "Daylight Aurora" (white + blue)
-// ------------------------------------------------------------
-// Matches the reference: deep-violet night-sky hero photo behind
-// a top bar (logo, bell, avatar) + greeting + XP/streak chips,
-// a light blue-tinted body, violet→blue accent gradients, and one
-// deliberately colorful full-bleed "battle" card.
+// 4. DESIGN TOKENS
 // ============================================================
 
 class _Palette {
   _Palette._();
 
-  /// Hero background photo — the moonlit clocktower skyline.
-  /// Add this asset in pubspec.yaml, e.g.:
-  ///   flutter:
-  ///     assets:
-  ///       - assets/images/dashboard_bg.jpg
   static const String backgroundAsset = 'assets/appHeader.png';
 
-  // Brand accent gradient (violet → blue), matching the reference CTAs.
   static const Color violet = Color(0xFF7C3AED);
   static const Color violetDeep = Color(0xFF4C2E8F);
   static const Color blue = Color(0xFF2563EB);
@@ -311,25 +331,19 @@ class _Palette {
   static const List<Color> ctaGradient = [violet, blue];
   static const List<Color> battleGradient = [violetDeep, violet, blue];
 
-  // Surfaces — very light blue instead of stark white/gray.
   static const Color scaffold = Color(0xFFEAF1FB);
   static const Color cardWhite = Color(0xFFF6FAFF);
   static const Color border = Color(0xFFDCE7F7);
 
-  // Text (dark, for use over the light-blue body)
   static const Color textPrimary = Color(0xFF181B34);
   static const Color textSecondary = Color(0xFF6B7086);
 
-  // Text over the dark photo hero
   static const Color textOnPhoto = Colors.white;
   static const Color textOnPhotoMuted = Color(0xFFE3E1FA);
 
-  // Status accents
   static const Color success = Color(0xFF16A34A);
   static const Color danger = Color(0xFFEF4444);
 
-  /// Soft, light-blue card with a subtle blue-tinted shadow —
-  /// the light-theme equivalent used everywhere below the hero.
   static BoxDecoration card({double radius = 22, Color? tint}) {
     return BoxDecoration(
       color: tint ?? cardWhite,
@@ -348,12 +362,6 @@ class _Palette {
 
 // ============================================================
 // 5. DASHBOARD SCREEN
-// ------------------------------------------------------------
-// FutureBuilder, state management, navigation calls and business
-// logic are unchanged. The app already provides its own bottom
-// navigation (see bottombar.dart / AppBottomNav) via
-// MainNavigation, so this screen no longer renders its own —
-// it only fills the content area above that bar.
 // ============================================================
 
 class DashboardScreen extends StatefulWidget {
@@ -443,6 +451,12 @@ class _DashboardScreenState extends State<DashboardScreen>
           }
 
           final data = snapshot.data!;
+
+          // Print avatar URL after loading
+          debugPrint("========== FINAL AVATAR URL ==========");
+          debugPrint("Avatar URL: ${data.user.avatarUrl}");
+          debugPrint("======================================");
+
           return RefreshIndicator(
             onRefresh: () async => _refresh(),
             color: _Palette.violet,
@@ -549,10 +563,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 // 6. WIDGETS
 // ============================================================
 
-// ------------------------------------------------------------
-// 6.0 Simple entrance animation — fade + rise, no controller
-// lifecycle to manage since it's a one-shot TweenAnimationBuilder.
-// ------------------------------------------------------------
 class _FadeInOnLoad extends StatelessWidget {
   const _FadeInOnLoad({required this.child});
   final Widget child;
@@ -577,9 +587,6 @@ class _FadeInOnLoad extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.1 Error View
-// ------------------------------------------------------------
 class _ErrorView extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
@@ -665,11 +672,6 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.2 Hero Header — logo/bell/avatar top bar, greeting, and
-// XP + streak chips, all over the moonlit clocktower photo.
-// FIXED: Increased height from 258 to 275 to prevent overflow
-// ------------------------------------------------------------
 class _HeroHeader extends StatelessWidget {
   final User user;
   final String greeting;
@@ -697,11 +699,10 @@ class _HeroHeader extends StatelessWidget {
         bottomRight: Radius.circular(32),
       ),
       child: SizedBox(
-        height: 275, // FIXED: Increased from 258 to 275 to fix overflow
+        height: 275,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Background photo
             Image.asset(
               _Palette.backgroundAsset,
               fit: BoxFit.cover,
@@ -716,18 +717,14 @@ class _HeroHeader extends StatelessWidget {
                 ),
               ),
             ),
-            // Legibility scrim. The last stop is a flat, fully-opaque
-            // scaffold-colored band (not a blend with the photo) so
-            // the card that overlaps the bottom edge sits on clean
-            // solid color — no hazy color bleed behind its shadow.
             const DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Color(0x552D1B69), // 33%
-                    Color(0x77120B2E), // 47%
+                    Color(0x552D1B69),
+                    Color(0x77120B2E),
                     Color(0x77120B2E),
                     _Palette.scaffold,
                     _Palette.scaffold,
@@ -736,22 +733,14 @@ class _HeroHeader extends StatelessWidget {
                 ),
               ),
             ),
-            // Content
             SafeArea(
               bottom: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  20,
-                  12,
-                  20,
-                  20,
-                ), // FIXED: Reduced bottom padding from 34 to 20
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
                 child: Column(
-                  mainAxisSize:
-                      MainAxisSize.min, // FIXED: Added to prevent overflow
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Top bar: logo · bell · avatar
                     Row(
                       children: [
                         const Expanded(child: _AppLogo()),
@@ -806,14 +795,9 @@ class _HeroHeader extends StatelessWidget {
                         fontSize: 12.5,
                       ),
                     ),
-                    const SizedBox(
-                      height: 8,
-                    ), // FIXED: Replaced Spacer() with fixed height
+                    const SizedBox(height: 8),
                     Padding(
-                      padding: const EdgeInsets.only(
-                        left: 50, // දකුණට ගෙනියන ප්‍රමාණය
-                        top: 10, // උඩට ගෙනියන ප්‍රමාණය
-                      ),
+                      padding: const EdgeInsets.only(left: 50, top: 10),
                       child: Row(
                         children: [
                           Expanded(
@@ -847,7 +831,6 @@ class _HeroHeader extends StatelessWidget {
   }
 }
 
-// Small "QuizLanka AI" wordmark for the hero top bar.
 class _AppLogo extends StatelessWidget {
   const _AppLogo();
 
@@ -970,6 +953,12 @@ class _AvatarButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint("========== AVATAR BUTTON ==========");
+    debugPrint("Avatar URL: ${user.avatarUrl}");
+    debugPrint("Avatar URL isEmpty: ${user.avatarUrl?.isEmpty ?? true}");
+    debugPrint("User Name: ${user.name}");
+    debugPrint("===================================");
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -1062,9 +1051,6 @@ class _HeroStatChip extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.3 Continue Learning Card — floats over the hero, light-blue card
-// ------------------------------------------------------------
 class _ContinueLearningCard extends StatelessWidget {
   final ContinueLearning data;
   final VoidCallback onResume;
@@ -1276,9 +1262,6 @@ class _ContinueLearningCard extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.3b Fallback summary card when there's nothing to continue yet
-// ------------------------------------------------------------
 class _StatsSummaryCard extends StatelessWidget {
   final Stats stats;
 
@@ -1365,11 +1348,6 @@ class _SummaryStat extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.4 Quick Access grid — big, filled, colorful tiles matching
-// the reference (icon in a translucent white badge, bold title,
-// muted subtitle, all on a saturated gradient card).
-// ------------------------------------------------------------
 class _QuickAccessGrid extends StatelessWidget {
   final Stats stats;
   final VoidCallback onSubjects;
@@ -1487,12 +1465,6 @@ class _QuickAccessGrid extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.5 Subjects grid, with the AI Quiz Generator tile appended
-// as the trailing full-width entry (matches the reference, which
-// places it right after the subject tiles rather than as a
-// separate section).
-// ------------------------------------------------------------
 class _SubjectsGrid extends StatelessWidget {
   final List<Subject> subjects;
   final VoidCallback onSubjectTap;
@@ -1583,11 +1555,6 @@ class _SubjectsGrid extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.6 AI Quiz Generator — compact grid tile version, styled to
-// match the reference's "brain + arrow" card that sits amongst
-// the subject tiles.
-// ------------------------------------------------------------
 class _AiQuizGeneratorTile extends StatelessWidget {
   final VoidCallback onTap;
 
@@ -1647,19 +1614,6 @@ class _AiQuizGeneratorTile extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.7 Live Quiz Battle card — the one deliberately-colorful,
-// full-bleed gradient card that pops against the light-blue body,
-// matching the reference's purple battle banner with the two
-// avatars either side of a lightning "VS".
-// ------------------------------------------------------------
-// NOTE: There is no live-presence / opponent-matching endpoint in
-// DashboardModel. This card is a visual entry point only — it uses
-// the current user's own real name/XP and a generic "opponent"
-// placeholder, and routes into subject selection (the closest
-// existing flow) rather than inventing a battle result or a fake
-// online-student count. Swap onStartBattle for a real matchmaking
-// call once that API exists.
 class _LiveQuizBattleCard extends StatelessWidget {
   final User user;
   final int userXp;
@@ -1890,11 +1844,6 @@ class _BattleAvatar extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.8 Personal "recent activity" card — real recent-quiz data
-// only, styled with rank-style numbering to echo the reference's
-// leaderboard rows without fabricating any cross-student ranking.
-// ------------------------------------------------------------
 class _PersonalLeaderboardCard extends StatelessWidget {
   final User user;
   final Stats stats;
@@ -2107,9 +2056,6 @@ class _RecentQuizRow extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.9 Small shared bits
-// ------------------------------------------------------------
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle(this.label);
   final String label;
