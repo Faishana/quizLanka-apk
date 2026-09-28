@@ -6,6 +6,7 @@
 // (soft lavender-white surfaces, glass cards, violet/cyan accents).
 // All persistence/logout/navigation LOGIC is unchanged:
 //   - language load/save via SharedPreferences
+//   - quiz language load/save via SharedPreferences
 //   - logout via TokenStorage.clearAll() + navigation reset
 //   - navigation to ProfileScreen
 //   - About dialog content
@@ -37,10 +38,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _Palette {
   static const bgTop = Color(0xFFF3FAFF);
   static const bgMid = Color(0xFFE8F4FD);
-  static const bgBottom = Color(0xFFFFFFFF);
 
   static const cardGlass = Color(0xFFFFFFFF);
-  static const cardGlassLight = Color(0xFFF3F1FB);
   static const cardBorder = Color(0xFFE7E4F6);
 
   static const textPrimary = Color(0xFF1E1B3A);
@@ -48,10 +47,7 @@ class _Palette {
   static const textMuted = Color(0xFF9490B8);
 
   static const neonCyan = Color(0xFF15AEDB);
-  static const neonBlue = Color(0xFF4E6BFF);
   static const neonViolet = Color(0xFF7C5CFF);
-  static const neonPink = Color(0xFFE24E90);
-  static const neonGold = Color(0xFFDB9A2C);
 
   static const danger = Color(0xFFE0435F);
   static const dangerBg = Color(0xFFFCE7EC);
@@ -71,6 +67,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen>
     with AutomaticKeepAliveClientMixin {
   String _language = 'English';
+  String _quizLanguage = 'si'; // Default: Sinhala
 
   @override
   void initState() {
@@ -82,12 +79,14 @@ class _SettingsScreenState extends State<SettingsScreen>
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _language = prefs.getString('language') ?? 'English';
+      _quizLanguage = prefs.getString('quiz_language') ?? 'si';
     });
   }
 
   Future<void> _saveSettings() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('language', _language);
+    await prefs.setString('quiz_language', _quizLanguage);
   }
 
   void _showLanguageSelector() {
@@ -99,6 +98,23 @@ class _SettingsScreenState extends State<SettingsScreen>
         onLanguageSelected: (language) {
           setState(() {
             _language = language;
+            _saveSettings();
+          });
+          Navigator.pop(context);
+        },
+      ),
+    );
+  }
+
+  void _showQuizLanguageSelector() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _QuizLanguageSelector(
+        currentQuizLanguage: _quizLanguage,
+        onQuizLanguageSelected: (quizLanguage) {
+          setState(() {
+            _quizLanguage = quizLanguage;
             _saveSettings();
           });
           Navigator.pop(context);
@@ -180,6 +196,20 @@ class _SettingsScreenState extends State<SettingsScreen>
   Widget build(BuildContext context) {
     super.build(context);
 
+    // Get display name for quiz language
+    String getQuizLanguageDisplay() {
+      switch (_quizLanguage) {
+        case 'en':
+          return 'English';
+        case 'si':
+          return 'Sinhala';
+        case 'ta':
+          return 'Tamil';
+        default:
+          return 'Sinhala';
+      }
+    }
+
     return Scaffold(
       backgroundColor: _Palette.bgTop,
       body: Stack(
@@ -212,13 +242,19 @@ class _SettingsScreenState extends State<SettingsScreen>
                         ),
                         const SizedBox(height: 16),
                         _SettingsSection(
-                          title: 'Preferences',
+                          title: 'App Preferences',
                           children: [
                             _SettingsTile(
                               icon: Icons.language_rounded,
-                              title: 'Language',
+                              title: 'App Language',
                               trailing: _language,
                               onTap: _showLanguageSelector,
+                            ),
+                            _SettingsTile(
+                              icon: Icons.quiz_rounded,
+                              title: 'Quiz Language',
+                              trailing: getQuizLanguageDisplay(),
+                              onTap: _showQuizLanguageSelector,
                             ),
                           ],
                         ),
@@ -378,6 +414,7 @@ class _TopBar extends StatelessWidget {
 // GLASS CARD — shared visual language with ProfileScreen
 // ============================================================
 class _GlassCard extends StatelessWidget {
+  // ignore: unused_element_parameter
   const _GlassCard({required this.child, this.padding, this.radius = 16});
   final Widget child;
   final EdgeInsetsGeometry? padding;
@@ -791,7 +828,7 @@ class _AboutDialog extends StatelessWidget {
 }
 
 // ============================================================
-// LANGUAGE SELECTOR
+// LANGUAGE SELECTOR (App Language)
 // ============================================================
 class _LanguageSelector extends StatelessWidget {
   final String currentLanguage;
@@ -821,18 +858,143 @@ class _LanguageSelector extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Select Language',
+            'Select App Language',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
               color: _Palette.textPrimary,
             ),
           ),
+          const SizedBox(height: 8),
+          const Text(
+            'UI language for buttons and settings',
+            style: TextStyle(fontSize: 13, color: _Palette.textSecondary),
+          ),
           const SizedBox(height: 16),
           ..._languages.map((lang) {
             final isSelected = lang['name'] == currentLanguage;
             return InkWell(
               onTap: () => onLanguageSelected(lang['name']!),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 20,
+                      height: 20,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isSelected
+                              ? _Palette.neonViolet
+                              : _Palette.cardBorder,
+                          width: 2,
+                        ),
+                      ),
+                      child: isSelected
+                          ? Center(
+                              child: Container(
+                                width: 10,
+                                height: 10,
+                                decoration: const BoxDecoration(
+                                  color: _Palette.neonViolet,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 14),
+                    Text(
+                      lang['name']!,
+                      style: TextStyle(
+                        color: isSelected
+                            ? _Palette.neonViolet
+                            : _Palette.textPrimary,
+                        fontWeight: isSelected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.pop(context),
+              style: TextButton.styleFrom(
+                foregroundColor: _Palette.textSecondary,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================
+// QUIZ LANGUAGE SELECTOR (Quiz Generation Language)
+// ============================================================
+class _QuizLanguageSelector extends StatelessWidget {
+  final String currentQuizLanguage;
+  final Function(String) onQuizLanguageSelected;
+
+  const _QuizLanguageSelector({
+    required this.currentQuizLanguage,
+    required this.onQuizLanguageSelected,
+  });
+
+  final List<Map<String, String>> _languages = const [
+    {'name': 'English', 'code': 'en'},
+    {'name': 'Sinhala', 'code': 'si'},
+    {'name': 'Tamil', 'code': 'ta'},
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: const BoxDecoration(
+        color: _Palette.cardGlass,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Select Quiz Language',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: _Palette.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Language in which AI generates quiz questions',
+            style: TextStyle(fontSize: 13, color: _Palette.textSecondary),
+          ),
+          const SizedBox(height: 16),
+          ..._languages.map((lang) {
+            final isSelected = lang['code'] == currentQuizLanguage;
+            return InkWell(
+              onTap: () => onQuizLanguageSelected(lang['code']!),
               borderRadius: BorderRadius.circular(12),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 10),

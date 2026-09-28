@@ -86,10 +86,11 @@ class SubjectService {
     }
 
     http.Response response;
+
     try {
       response = await _client
           .get(
-            Uri.parse('${ApiConfig.baseUrl}/public/subjects'),
+            Uri.parse('${ApiConfig.baseUrl}/subjects'),
             headers: ApiConfig.getHeaders(token),
           )
           .timeout(const Duration(seconds: 15));
@@ -104,23 +105,51 @@ class SubjectService {
     }
 
     Map<String, dynamic> data;
+
     try {
       data = jsonDecode(response.body) as Map<String, dynamic>;
     } on FormatException {
       throw Exception('Received an invalid response from the server.');
     }
 
+    debugPrint('Subjects API Status: ${response.statusCode}');
+    debugPrint('Subjects API Response: ${response.body}');
+
+    /*
+  |--------------------------------------------------------------------------
+  | SUCCESS
+  |--------------------------------------------------------------------------
+  */
+
     if (response.statusCode == 200 && data['success'] == true) {
-      final subjectsList = data['data'] as List<dynamic>;
+      final subjectsList = data['subjects'];
+
+      if (subjectsList == null || subjectsList is! List) {
+        throw Exception('Invalid subjects data received from server.');
+      }
+
       return subjectsList
           .map((e) => Subject.fromJson(e as Map<String, dynamic>))
           .toList();
     }
 
+    /*
+  |--------------------------------------------------------------------------
+  | UNAUTHORIZED
+  |--------------------------------------------------------------------------
+  */
+
     if (response.statusCode == 401) {
       await TokenStorage.clearAll();
+
       throw Exception('Session expired. Please login again.');
     }
+
+    /*
+  |--------------------------------------------------------------------------
+  | SERVER ERROR
+  |--------------------------------------------------------------------------
+  */
 
     if (response.statusCode >= 500) {
       throw Exception('Server error. Please try again later.');
@@ -145,7 +174,6 @@ class _Palette {
 
   static const Color violet = Color(0xFF6D28D9);
   static const Color violetDeep = Color(0xFF4C1D95);
-  static const Color blue = Color(0xFF2563EB);
   static const Color gold = Color(0xFFF5B942);
   static const List<Color> ctaGradient = [Color(0xFF7C3AED), Color(0xFF2563EB)];
   static const List<Color> heroGradient = [
@@ -172,7 +200,6 @@ class _Palette {
   static const Color textMuted = Color(0xFF9A9CB0);
 
   static const Color danger = Color(0xFFEF4444);
-
 
   static BoxDecoration glass({double radius = 18}) {
     return BoxDecoration(
@@ -348,13 +375,12 @@ class _SubjectsScreenState extends State<SubjectsScreen>
 
                       final allSubjects = snapshot.data!;
                       final subjects = _applyFilter(allSubjects);
+
+                      // Calculate total quizzes from all subjects
                       final totalQuizzes = allSubjects.fold<int>(
                         0,
                         (sum, s) => sum + (s.questionsCount ?? 0),
                       );
-                      final readyCount = allSubjects
-                          .where((s) => (s.questionsCount ?? 0) > 0)
-                          .length;
 
                       return RefreshIndicator(
                         onRefresh: () async => _refresh(),
@@ -369,7 +395,6 @@ class _SubjectsScreenState extends State<SubjectsScreen>
                                 child: _HeroStatsBanner(
                                   subjectCount: allSubjects.length,
                                   totalQuizzes: totalQuizzes,
-                                  readyCount: readyCount,
                                 ),
                               ),
                             if (allSubjects.isEmpty)
@@ -622,20 +647,17 @@ class _SearchField extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// 6.3 Hero stats banner — premium gradient card replacing the
-// flat white stats strip. Same real numbers (subject count /
-// total quizzes / ready-now), presented with more visual weight.
+// 6.3 Hero stats banner — premium gradient card with only
+// Subjects and Total Quizzes (Ready Now removed)
 // ------------------------------------------------------------
 class _HeroStatsBanner extends StatelessWidget {
   const _HeroStatsBanner({
     required this.subjectCount,
     required this.totalQuizzes,
-    required this.readyCount,
   });
 
   final int subjectCount;
   final int totalQuizzes;
-  final int readyCount;
 
   @override
   Widget build(BuildContext context) {
@@ -704,7 +726,7 @@ class _HeroStatsBanner extends StatelessWidget {
                     Expanded(
                       child: _HeroStat(
                         value: '$subjectCount',
-                        label: 'Subjects',
+                        label: 'Total Subjects',
                         icon: Icons.menu_book_rounded,
                       ),
                     ),
@@ -714,14 +736,6 @@ class _HeroStatsBanner extends StatelessWidget {
                         value: '$totalQuizzes',
                         label: 'Total Quizzes',
                         icon: Icons.quiz_rounded,
-                      ),
-                    ),
-                    _HeroDivider(),
-                    Expanded(
-                      child: _HeroStat(
-                        value: '$readyCount',
-                        label: 'Ready Now',
-                        icon: Icons.bolt_rounded,
                       ),
                     ),
                   ],
@@ -952,7 +966,7 @@ class _ErrorView extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.refresh_rounded, size: 18, color: Colors.white),
-                    SizedBox(width: 8),
+                    const SizedBox(width: 8),
                     Text(
                       'Retry',
                       style: TextStyle(
@@ -1213,6 +1227,7 @@ class SubjectIcon extends StatelessWidget {
 // and a soft colored glow keyed to the subject's own color.
 // Layout still icon → name → quiz-count line only, no fabricated
 // progress/XP/rank data.
+// "Coming soon" removed — always shows question count
 // ------------------------------------------------------------
 class _SubjectTile extends StatefulWidget {
   final Subject subject;
@@ -1330,9 +1345,7 @@ class _SubjectTileState extends State<_SubjectTile> {
                       Icon(Icons.quiz_rounded, size: 12, color: color),
                       const SizedBox(width: 5),
                       Text(
-                        questionCount > 0
-                            ? '$questionCount Quizzes'
-                            : 'Coming soon',
+                        '$questionCount Quizzes',
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w700,

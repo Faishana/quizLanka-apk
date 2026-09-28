@@ -1,6 +1,6 @@
 // lib/quiz_history_screen.dart
 // QuizLanka AI — Quiz History Screen
-// Restyled to match the "Aurora Glass" theme (see bottombar.dart)
+// Restyled to a light "Aurora" theme with soft blue shadows
 // Self-contained: models + API + UI in one file
 
 import 'dart:convert';
@@ -10,6 +10,62 @@ import 'package:quiz_lanka/Login.dart';
 import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/config/appTheam.dart';
 import 'package:quiz_lanka/quiz_result_screen.dart';
+
+// ─────────────────────────────────────────────
+// LIGHT THEME PALETTE (local to this screen)
+// ------------------------------------------------------------
+// This screen previously relied on AppTheme's dark "Aurora Glass"
+// palette (AppTheme.backgroundGradient, .violet, .cyan, .success,
+// .warning, .danger, .textPrimary/Secondary, .glassCard). Since
+// appTheam.dart isn't part of this file, the light-theme colors
+// and shadows are defined here so the screen is self-contained.
+// If you want this app-wide, mirror these values into AppTheme.
+// ─────────────────────────────────────────────
+class _LightTheme {
+  static const List<Color> backgroundGradient = [
+    Color(0xFFFAFBFF),
+    Color(0xFFEAF0FF),
+  ];
+
+  static const Color primaryBlue = Color(0xFF3D5CFF);
+  static const Color accentCyan = Color(0xFF2FB6C9);
+  static const Color violet = Color(0xFF6C5CE7);
+  static const Color success = Color(0xFF2FB380);
+  static const Color warning = Color(0xFFE0A23B);
+  static const Color danger = Color(0xFFE05A5A);
+
+  static const Color textPrimary = Color(0xFF1B2440);
+  static const Color textSecondary = Color(0xFF6B7A99);
+
+  static const Color surface = Colors.white;
+  static const Color surfaceMuted = Color(0xFFF3F6FF);
+  static const Color border = Color(0xFFDCE4FF);
+
+  static List<BoxShadow> blueShadow({
+    double blur = 24,
+    double spread = 0,
+    Offset offset = const Offset(0, 10),
+    double opacity = 0.16,
+  }) {
+    return [
+      BoxShadow(
+        color: primaryBlue.withValues(alpha: opacity),
+        blurRadius: blur,
+        spreadRadius: spread,
+        offset: offset,
+      ),
+    ];
+  }
+
+  static BoxDecoration card({double radius = 18}) {
+    return BoxDecoration(
+      color: surface,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: border),
+      boxShadow: blueShadow(),
+    );
+  }
+}
 
 // ─────────────────────────────────────────────
 // MODELS
@@ -25,14 +81,14 @@ class _QuizSubject {
   factory _QuizSubject.fromJson(Map<String, dynamic> j) => _QuizSubject(
     id: j['id'] as int,
     name: j['name'] as String,
-    color: (j['color'] as String?) ?? '#9B6BFF',
+    color: (j['color'] as String?) ?? '#6C5CE7',
   );
 
   Color get flutterColor {
     try {
       return Color(int.parse('FF${color.replaceAll('#', '')}', radix: 16));
     } catch (_) {
-      return AppTheme.violet;
+      return _LightTheme.violet;
     }
   }
 }
@@ -99,9 +155,9 @@ class _QuizHistoryItem {
   }
 
   Color get percentageColor {
-    if (percentage >= 75) return AppTheme.success;
-    if (percentage >= 50) return AppTheme.warning;
-    return AppTheme.danger;
+    if (percentage >= 75) return _LightTheme.success;
+    if (percentage >= 50) return _LightTheme.warning;
+    return _LightTheme.danger;
   }
 }
 
@@ -181,13 +237,13 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
 
     // ✅ Steps 1 & 2: Import removed, bottom bar removed
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0B22),
+      backgroundColor: _LightTheme.backgroundGradient.first,
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: AppTheme.backgroundGradient,
+            colors: _LightTheme.backgroundGradient,
           ),
         ),
         child: SafeArea(
@@ -224,7 +280,7 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
             child: Text(
               'Quiz History',
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: _LightTheme.textPrimary,
                 fontWeight: FontWeight.w800,
                 fontSize: 20,
               ),
@@ -247,8 +303,8 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
 
     return RefreshIndicator(
       onRefresh: _loadHistory,
-      color: AppTheme.violet,
-      backgroundColor: const Color(0xFF14132F),
+      color: _LightTheme.violet,
+      backgroundColor: _LightTheme.surface,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
@@ -257,7 +313,7 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
           const Text(
             'All Quizzes',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: _LightTheme.textPrimary,
               fontWeight: FontWeight.w700,
               fontSize: 16,
             ),
@@ -304,7 +360,7 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
           child: _MiniStat(
             value: total.toString(),
             label: 'Total',
-            color: AppTheme.cyan,
+            color: _LightTheme.accentCyan,
           ),
         ),
         const SizedBox(width: 10),
@@ -312,7 +368,7 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
           child: _MiniStat(
             value: '${avgPct.toStringAsFixed(0)}%',
             label: 'Average',
-            color: AppTheme.warning,
+            color: _LightTheme.warning,
           ),
         ),
         const SizedBox(width: 10),
@@ -320,7 +376,7 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
           child: _MiniStat(
             value: '${best.toStringAsFixed(0)}%',
             label: 'Best',
-            color: AppTheme.success,
+            color: _LightTheme.success,
           ),
         ),
       ],
@@ -332,11 +388,14 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          CircularProgressIndicator(color: AppTheme.violet, strokeWidth: 2.5),
+          CircularProgressIndicator(
+            color: _LightTheme.violet,
+            strokeWidth: 2.5,
+          ),
           SizedBox(height: 16),
           Text(
             'Loading history…',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+            style: TextStyle(color: _LightTheme.textSecondary, fontSize: 14),
           ),
         ],
       ),
@@ -354,23 +413,28 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: AppTheme.danger.withValues(alpha: 0.12),
+                color: _LightTheme.danger.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: AppTheme.danger.withValues(alpha: 0.25),
+                  color: _LightTheme.danger.withValues(alpha: 0.25),
+                ),
+                boxShadow: _LightTheme.blueShadow(
+                  blur: 16,
+                  offset: const Offset(0, 6),
+                  opacity: 0.10,
                 ),
               ),
               child: const Icon(
                 Icons.wifi_off_rounded,
                 size: 36,
-                color: AppTheme.danger,
+                color: _LightTheme.danger,
               ),
             ),
             const SizedBox(height: 20),
             const Text(
               'Unable to load history',
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: _LightTheme.textPrimary,
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
               ),
@@ -380,7 +444,7 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
               _error!,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color: AppTheme.textSecondary,
+                color: _LightTheme.textSecondary,
                 fontSize: 14,
                 height: 1.5,
               ),
@@ -390,17 +454,23 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
               onPressed: _loadHistory,
               icon: const Icon(Icons.refresh_rounded, size: 18),
               label: const Text('Retry'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.violet,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 28,
-                  vertical: 14,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
+              style:
+                  FilledButton.styleFrom(
+                    backgroundColor: _LightTheme.violet,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 28,
+                      vertical: 14,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ).copyWith(
+                    shadowColor: WidgetStateProperty.all(
+                      _LightTheme.primaryBlue.withValues(alpha: 0.35),
+                    ),
+                  ),
             ),
           ],
         ),
@@ -417,15 +487,20 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
             width: 72,
             height: 72,
             decoration: BoxDecoration(
-              color: AppTheme.violet.withValues(alpha: 0.14),
+              color: _LightTheme.violet.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: AppTheme.violet.withValues(alpha: 0.25),
+                color: _LightTheme.violet.withValues(alpha: 0.25),
+              ),
+              boxShadow: _LightTheme.blueShadow(
+                blur: 16,
+                offset: const Offset(0, 6),
+                opacity: 0.10,
               ),
             ),
             child: const Icon(
               Icons.history_rounded,
-              color: AppTheme.violet,
+              color: _LightTheme.violet,
               size: 36,
             ),
           ),
@@ -433,7 +508,7 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
           const Text(
             'No quiz history yet',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: _LightTheme.textPrimary,
               fontSize: 18,
               fontWeight: FontWeight.w700,
             ),
@@ -441,7 +516,7 @@ class _QuizHistoryScreenState extends State<QuizHistoryScreen>
           const SizedBox(height: 8),
           const Text(
             'Complete your first quiz to see history here.',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+            style: TextStyle(color: _LightTheme.textSecondary, fontSize: 14),
           ),
         ],
       ),
@@ -465,7 +540,7 @@ class _HistoryCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        decoration: AppTheme.glassCard(radius: 18),
+        decoration: _LightTheme.card(radius: 18),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(18),
           child: Row(
@@ -480,7 +555,7 @@ class _HistoryCard extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.16),
+                  color: color.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: color.withValues(alpha: 0.3)),
                 ),
@@ -503,7 +578,7 @@ class _HistoryCard extends StatelessWidget {
                     Text(
                       item.subject.name,
                       style: const TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: _LightTheme.textPrimary,
                         fontWeight: FontWeight.w700,
                         fontSize: 15,
                       ),
@@ -518,7 +593,7 @@ class _HistoryCard extends StatelessWidget {
                               ? '${item.score}/${item.totalQuestions}'
                               : 'Score: ${item.score}',
                           style: const TextStyle(
-                            color: AppTheme.textSecondary,
+                            color: _LightTheme.textSecondary,
                             fontSize: 12,
                           ),
                         ),
@@ -528,7 +603,7 @@ class _HistoryCard extends StatelessWidget {
                     Text(
                       item.formattedDate,
                       style: TextStyle(
-                        color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                        color: _LightTheme.textSecondary.withValues(alpha: 0.8),
                         fontSize: 11,
                       ),
                     ),
@@ -546,7 +621,7 @@ class _HistoryCard extends StatelessWidget {
                         vertical: 5,
                       ),
                       decoration: BoxDecoration(
-                        color: item.percentageColor.withValues(alpha: 0.14),
+                        color: item.percentageColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
                           color: item.percentageColor.withValues(alpha: 0.3),
@@ -564,7 +639,7 @@ class _HistoryCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     Icon(
                       Icons.chevron_right_rounded,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                      color: _LightTheme.textSecondary.withValues(alpha: 0.8),
                       size: 20,
                     ),
                   ],
@@ -603,19 +678,24 @@ class _CircleIconButton extends StatelessWidget {
         height: 40,
         decoration: BoxDecoration(
           color: accent
-              ? AppTheme.violet.withValues(alpha: 0.16)
-              : Colors.white.withValues(alpha: 0.06),
+              ? _LightTheme.violet.withValues(alpha: 0.12)
+              : _LightTheme.surface,
           shape: BoxShape.circle,
           border: Border.all(
             color: accent
-                ? AppTheme.violet.withValues(alpha: 0.3)
-                : Colors.white.withValues(alpha: 0.1),
+                ? _LightTheme.violet.withValues(alpha: 0.3)
+                : _LightTheme.border,
+          ),
+          boxShadow: _LightTheme.blueShadow(
+            blur: 10,
+            offset: const Offset(0, 3),
+            opacity: 0.12,
           ),
         ),
         child: Icon(
           icon,
           size: 18,
-          color: accent ? AppTheme.violet : AppTheme.textPrimary,
+          color: accent ? _LightTheme.violet : _LightTheme.textPrimary,
         ),
       ),
     );
@@ -637,14 +717,14 @@ class _MiniStat extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: AppTheme.glassCard(radius: 16),
+      decoration: _LightTheme.card(radius: 16),
       child: Column(
         children: [
           Container(
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.14),
+              color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: color.withValues(alpha: 0.28)),
             ),
@@ -663,7 +743,7 @@ class _MiniStat extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-              color: AppTheme.textSecondary,
+              color: _LightTheme.textSecondary,
               fontSize: 11,
               fontWeight: FontWeight.w500,
             ),
@@ -684,14 +764,14 @@ class _Chip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: AppTheme.violet.withValues(alpha: 0.16),
+        color: _LightTheme.violet.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppTheme.violet.withValues(alpha: 0.3)),
+        border: Border.all(color: _LightTheme.violet.withValues(alpha: 0.3)),
       ),
       child: Text(
         label,
         style: const TextStyle(
-          color: AppTheme.violet,
+          color: _LightTheme.violet,
           fontSize: 10,
           fontWeight: FontWeight.w700,
         ),

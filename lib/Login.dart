@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:quiz_lanka/Registre.dart';
 import 'package:quiz_lanka/config/api_config.dart';
+import 'package:quiz_lanka/forgot_password_screen.dart';
 import 'package:quiz_lanka/main_navigation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -724,7 +725,12 @@ class _LoginScreenState extends State<LoginScreen>
                     const Spacer(),
                     GestureDetector(
                       onTap: () {
-                        // TODO: forgot password
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ForgotPasswordScreen(),
+                          ),
+                        );
                       },
                       child: const Text(
                         'Forgot Password?',

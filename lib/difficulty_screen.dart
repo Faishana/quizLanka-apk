@@ -12,6 +12,7 @@ import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/config/appTheam.dart';
 import 'package:quiz_lanka/quiz_screen.dart';
 import 'package:quiz_lanka/subjects_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class DifficultyScreen extends StatefulWidget {
   final Subject subject;
@@ -60,6 +61,10 @@ class _DifficultyScreenState extends State<DifficultyScreen> {
     if (_isStarting) return;
     setState(() => _isStarting = true);
 
+    // Read quiz language from SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final quizLanguage = prefs.getString('quiz_language') ?? 'si';
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -79,6 +84,7 @@ class _DifficultyScreenState extends State<DifficultyScreen> {
         body: jsonEncode({
           'subject_id': widget.subject.id,
           'difficulty': difficulty,
+          'quiz_language': quizLanguage, // Send selected quiz language
         }),
       );
 

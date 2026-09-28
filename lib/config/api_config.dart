@@ -96,4 +96,11 @@ class ApiConfig {
 
   static const String appName = 'QuizLanka';
   static const String version = '1.0.0';
+
+  // ============================
+// Past Papers
+// ============================
+
+  static const String pastPaperSubjects =
+      '/past-papers/subjects';
 }

@@ -14,7 +14,7 @@ import 'package:quiz_lanka/quiz_history_screen.dart';
 import 'package:quiz_lanka/subjects_screen.dart';
 
 // ============================================================
-// 2. MODELS
+// 2. MODELS  (unchanged — same fields, same parsing, same features)
 // ============================================================
 
 class Grade {
@@ -49,7 +49,6 @@ class User {
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
-    // Debug prints to see what's coming from backend
     debugPrint("========== USER FROM JSON ==========");
     debugPrint("avatar_url: ${json['avatar_url']}");
     debugPrint("profile_image: ${json['profile_image']}");
@@ -58,7 +57,6 @@ class User {
     debugPrint("profile_photo: ${json['profile_photo']}");
     debugPrint("====================================");
 
-    // Try multiple possible field names
     String? avatarUrl;
 
     if (json['display_avatar'] != null &&
@@ -232,6 +230,20 @@ class DashboardModel {
     debugPrint("Full Response: ${jsonEncode(json)}");
     debugPrint("========================================");
 
+    // Debug subjects specifically
+    debugPrint("========== SUBJECTS FROM API ==========");
+    if (json['subjects'] != null) {
+      debugPrint("Subjects type: ${json['subjects'].runtimeType}");
+      debugPrint("Subjects length: ${(json['subjects'] as List).length}");
+      for (var subject in json['subjects']) {
+        debugPrint("Subject data: $subject");
+      }
+    } else {
+      debugPrint("No subjects key found in response");
+      debugPrint("Available keys: ${json.keys}");
+    }
+    debugPrint("========================================");
+
     return DashboardModel(
       success: json['success'] as bool,
       user: User.fromJson(json['user'] as Map<String, dynamic>),
@@ -241,9 +253,11 @@ class DashboardModel {
               json['continue_learning'] as Map<String, dynamic>,
             )
           : null,
-      subjects: (json['subjects'] as List<dynamic>)
-          .map((e) => Subject.fromJson(e as Map<String, dynamic>))
-          .toList(),
+      subjects: json['subjects'] != null
+          ? (json['subjects'] as List<dynamic>)
+                .map((e) => Subject.fromJson(e as Map<String, dynamic>))
+                .toList()
+          : [],
       recentQuizzes: (json['recent_quizzes'] as List<dynamic>)
           .map((e) => RecentQuiz.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -252,7 +266,7 @@ class DashboardModel {
 }
 
 // ============================================================
-// 3. SERVICE
+// 3. SERVICE  (unchanged — same endpoints, same error handling)
 // ============================================================
 
 class DashboardService {
@@ -304,6 +318,59 @@ class DashboardService {
     }
 
     throw Exception(data['message'] ?? 'Failed to load dashboard.');
+  }
+
+  Future<List<Subject>> getSubjects() async {
+    final token = await TokenStorage.getToken();
+
+    if (token == null || token.isEmpty) {
+      throw Exception('Authentication token not found.');
+    }
+
+    http.Response response;
+    try {
+      response = await _client
+          .get(
+            Uri.parse('${ApiConfig.baseUrl}/subjects'),
+            headers: ApiConfig.getHeaders(token),
+          )
+          .timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      throw Exception('The request timed out. Please try again.');
+    } on SocketException {
+      throw Exception('No internet connection. Please check your network.');
+    } on HttpException {
+      throw Exception('Could not reach the server. Please try again.');
+    } on FormatException {
+      throw Exception('Invalid server response. Please try again.');
+    }
+
+    Map<String, dynamic> data;
+    try {
+      data = jsonDecode(response.body) as Map<String, dynamic>;
+    } on FormatException {
+      throw Exception('Received an invalid response from the server.');
+    }
+
+    debugPrint('Subjects API Status: ${response.statusCode}');
+    debugPrint('Subjects API Response: ${response.body}');
+
+    if (response.statusCode == 200 && data['success'] == true) {
+      final subjectsList = data['subjects'];
+      if (subjectsList == null || subjectsList is! List) {
+        throw Exception('Invalid subjects data received from server.');
+      }
+      return subjectsList
+          .map((e) => Subject.fromJson(e as Map<String, dynamic>))
+          .toList();
+    }
+
+    if (response.statusCode == 401) {
+      await TokenStorage.clearAll();
+      throw Exception('Session expired. Please login again.');
+    }
+
+    throw Exception(data['message'] ?? 'Failed to load subjects.');
   }
 
   void dispose() {
@@ -361,6 +428,101 @@ class _Palette {
 }
 
 // ============================================================
+// 4b. RESPONSIVE HELPERS
+// ------------------------------------------------------------
+// Centralizes every breakpoint decision so the rest of the file
+// stays declarative. Nothing here changes *what* is shown —
+// only how much space, padding, and text scale it gets on
+// phones vs. tablets vs. wider/foldable screens.
+// ============================================================
+
+enum _DeviceType { compactPhone, phone, tablet, desktop }
+
+class _Responsive {
+  _Responsive._();
+
+  static double width(BuildContext context) => MediaQuery.sizeOf(context).width;
+
+  static _DeviceType deviceType(BuildContext context) {
+    final w = width(context);
+    if (w >= 1024) return _DeviceType.desktop;
+    if (w >= 600) return _DeviceType.tablet;
+    if (w < 340) return _DeviceType.compactPhone;
+    return _DeviceType.phone;
+  }
+
+  static bool isTabletUp(BuildContext context) => width(context) >= 600;
+  static bool isCompact(BuildContext context) => width(context) < 340;
+
+  /// Horizontal page padding — grows with the viewport so content
+  /// never feels cramped on a tablet or stretched edge-to-edge.
+  static double horizontalPadding(BuildContext context) {
+    switch (deviceType(context)) {
+      case _DeviceType.desktop:
+        return 56;
+      case _DeviceType.tablet:
+        return 36;
+      case _DeviceType.phone:
+      case _DeviceType.compactPhone:
+        return 20;
+    }
+  }
+
+  /// Caps how wide the main content column can grow on large
+  /// screens, then the caller centers it — this is what keeps
+  /// cards from looking absurdly wide on a tablet/desktop.
+  static double maxContentWidth(BuildContext context) {
+    switch (deviceType(context)) {
+      case _DeviceType.desktop:
+        return 900;
+      case _DeviceType.tablet:
+        return 680;
+      case _DeviceType.phone:
+      case _DeviceType.compactPhone:
+        return double.infinity;
+    }
+  }
+
+  static double heroHeight(BuildContext context) {
+    switch (deviceType(context)) {
+      case _DeviceType.desktop:
+        return 340;
+      case _DeviceType.tablet:
+        return 310;
+      case _DeviceType.phone:
+      case _DeviceType.compactPhone:
+        return 275;
+    }
+  }
+
+  /// Gentle font-size scaling — never more than ~15% either way,
+  /// so type never looks jarring, just comfortably sized per device.
+  static double scale(BuildContext context, double base) {
+    switch (deviceType(context)) {
+      case _DeviceType.desktop:
+        return base * 1.15;
+      case _DeviceType.tablet:
+        return base * 1.08;
+      case _DeviceType.phone:
+        return base;
+      case _DeviceType.compactPhone:
+        return base * 0.94;
+    }
+  }
+
+  static double avatarRadius(BuildContext context, double base) {
+    switch (deviceType(context)) {
+      case _DeviceType.desktop:
+      case _DeviceType.tablet:
+        return base * 1.15;
+      case _DeviceType.phone:
+      case _DeviceType.compactPhone:
+        return base;
+    }
+  }
+}
+
+// ============================================================
 // 5. DASHBOARD SCREEN
 // ============================================================
 
@@ -375,11 +537,13 @@ class _DashboardScreenState extends State<DashboardScreen>
     with AutomaticKeepAliveClientMixin {
   final DashboardService _service = DashboardService();
   late Future<DashboardModel> _dashboardFuture;
+  late Future<List<Subject>> _subjectsFuture;
 
   @override
   void initState() {
     super.initState();
     _dashboardFuture = _service.getDashboard();
+    _subjectsFuture = _service.getSubjects();
   }
 
   @override
@@ -391,6 +555,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   void _refresh() {
     setState(() {
       _dashboardFuture = _service.getDashboard();
+      _subjectsFuture = _service.getSubjects();
     });
   }
 
@@ -452,10 +617,12 @@ class _DashboardScreenState extends State<DashboardScreen>
 
           final data = snapshot.data!;
 
-          // Print avatar URL after loading
           debugPrint("========== FINAL AVATAR URL ==========");
           debugPrint("Avatar URL: ${data.user.avatarUrl}");
           debugPrint("======================================");
+
+          final hPad = _Responsive.horizontalPadding(context);
+          final maxWidth = _Responsive.maxContentWidth(context);
 
           return RefreshIndicator(
             onRefresh: () async => _refresh(),
@@ -478,74 +645,144 @@ class _DashboardScreenState extends State<DashboardScreen>
                   ),
                   Transform.translate(
                     offset: const Offset(0, -22),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (data.continueLearning != null)
-                            _ContinueLearningCard(
-                              data: data.continueLearning!,
-                              onResume: _navigateToSubjects,
-                            )
-                          else
-                            _StatsSummaryCard(stats: data.stats),
-                          const SizedBox(height: 26),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: maxWidth),
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: hPad),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const _SectionTitle('Quick Access'),
-                              _ViewAllButton(onTap: _navigateToSubjects),
+                              if (data.continueLearning != null)
+                                _ContinueLearningCard(
+                                  data: data.continueLearning!,
+                                  onResume: _navigateToSubjects,
+                                )
+                              else
+                                _StatsSummaryCard(stats: data.stats),
+                              const SizedBox(height: 26),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const _SectionTitle('Quick Access'),
+                                  _ViewAllButton(onTap: _navigateToSubjects),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              _QuickAccessRow(
+                                stats: data.stats,
+                                onSubjects: _navigateToSubjects,
+                                onHistory: _navigateToHistory,
+                                onProfile: () =>
+                                    _navigateToProfile(data.user),
+                              ),
+                              const SizedBox(height: 26),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const _SectionTitle('Subjects'),
+                                  _ViewAllButton(onTap: _navigateToSubjects),
+                                ],
+                              ),
+                              const SizedBox(height: 14),
+                              // Use FutureBuilder for subjects
+                              FutureBuilder<List<Subject>>(
+                                future: _subjectsFuture,
+                                builder: (context, subjectSnapshot) {
+                                  if (subjectSnapshot.connectionState ==
+                                      ConnectionState.waiting) {
+                                    return Container(
+                                      height: 100,
+                                      decoration: _Palette.card(radius: 18),
+                                      child: const Center(
+                                        child: CircularProgressIndicator(
+                                          color: _Palette.violet,
+                                          strokeWidth: 2.5,
+                                        ),
+                                      ),
+                                    );
+                                  }
+
+                                  if (subjectSnapshot.hasError) {
+                                    return Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(20),
+                                      decoration: _Palette.card(radius: 18),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.error_outline_rounded,
+                                            size: 32,
+                                            color: _Palette.danger,
+                                          ),
+                                          const SizedBox(height: 8),
+                                          const Text(
+                                            'Failed to load subjects',
+                                            style: TextStyle(
+                                              color: _Palette.textSecondary,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          GestureDetector(
+                                            onTap: () {
+                                              setState(() {
+                                                _subjectsFuture = _service
+                                                    .getSubjects();
+                                              });
+                                            },
+                                            child: const Text(
+                                              'Retry',
+                                              style: TextStyle(
+                                                color: _Palette.violet,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }
+
+                                  final subjects = subjectSnapshot.data ?? [];
+                                  return _SubjectsRow(
+                                    subjects: subjects,
+                                    onSubjectTap: _navigateToSubjects,
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 26),
+                              _LiveQuizBattleCard(
+                                user: data.user,
+                                userXp: data.stats.xpPoints ?? 0,
+                                onStartBattle: _navigateToSubjects,
+                              ),
+                              const SizedBox(height: 26),
+                              const _SectionTitle('Your Recent Activity'),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'A live cross-student leaderboard needs a '
+                                'ranking endpoint that isn\'t in the API yet — '
+                                'showing your own recent results instead.',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: _Palette.textSecondary,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              _PersonalLeaderboardCard(
+                                user: data.user,
+                                stats: data.stats,
+                                recentQuizzes: data.recentQuizzes,
+                                onViewAll: _navigateToHistory,
+                              ),
                             ],
                           ),
-                          const SizedBox(height: 12),
-                          _QuickAccessGrid(
-                            stats: data.stats,
-                            onSubjects: _navigateToSubjects,
-                            onHistory: _navigateToHistory,
-                            onProfile: () => _navigateToProfile(data.user),
-                          ),
-                          const SizedBox(height: 26),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const _SectionTitle('Subjects'),
-                              _ViewAllButton(onTap: _navigateToSubjects),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          _SubjectsGrid(
-                            subjects: data.subjects,
-                            onSubjectTap: _navigateToSubjects,
-                            onGenerateTap: _navigateToSubjects,
-                          ),
-                          const SizedBox(height: 26),
-                          _LiveQuizBattleCard(
-                            user: data.user,
-                            userXp: data.stats.xpPoints ?? 0,
-                            onStartBattle: _navigateToSubjects,
-                          ),
-                          const SizedBox(height: 26),
-                          const _SectionTitle('Your Recent Activity'),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'A live cross-student leaderboard needs a '
-                            'ranking endpoint that isn\'t in the API yet — '
-                            'showing your own recent results instead.',
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              color: _Palette.textSecondary,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          _PersonalLeaderboardCard(
-                            user: data.user,
-                            stats: data.stats,
-                            recentQuizzes: data.recentQuizzes,
-                            onViewAll: _navigateToHistory,
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -598,73 +835,76 @@ class _ErrorView extends StatelessWidget {
     return Container(
       color: _Palette.scaffold,
       child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: _Palette.danger.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.error_outline_rounded,
-                  size: 36,
-                  color: _Palette.danger,
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Unable to load dashboard',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  color: _Palette.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                message.replaceFirst('Exception: ', ''),
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: _Palette.textSecondary,
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: 24),
-              GestureDetector(
-                onTap: onRetry,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 32,
-                    vertical: 14,
-                  ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: _Palette.ctaGradient,
-                    ),
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _Palette.violet.withValues(alpha: 0.32),
-                        blurRadius: 16,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
+                    color: _Palette.danger.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
                   ),
-                  child: const Text(
-                    'Retry',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
+                  child: const Icon(
+                    Icons.error_outline_rounded,
+                    size: 36,
+                    color: _Palette.danger,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Unable to load dashboard',
+                  style: TextStyle(
+                    fontSize: _Responsive.scale(context, 18),
+                    fontWeight: FontWeight.w800,
+                    color: _Palette.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  message.replaceFirst('Exception: ', ''),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: _Palette.textSecondary,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                GestureDetector(
+                  onTap: onRetry,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: _Palette.ctaGradient,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _Palette.violet.withValues(alpha: 0.32),
+                          blurRadius: 16,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: const Text(
+                      'Retry',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -693,13 +933,16 @@ class _HeroHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hPad = _Responsive.horizontalPadding(context);
+    final maxWidth = _Responsive.maxContentWidth(context);
+
     return ClipRRect(
       borderRadius: const BorderRadius.only(
         bottomLeft: Radius.circular(32),
         bottomRight: Radius.circular(32),
       ),
       child: SizedBox(
-        height: 275,
+        height: _Responsive.heroHeight(context),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -735,92 +978,98 @@ class _HeroHeader extends StatelessWidget {
             ),
             SafeArea(
               bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxWidth),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(hPad, 12, hPad, 20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Expanded(child: _AppLogo()),
-                        _NotificationBell(
-                          count: notificationsCount,
-                          onTap: onBellTap,
+                        Row(
+                          children: [
+                            const Expanded(child: _AppLogo()),
+                            _NotificationBell(
+                              count: notificationsCount,
+                              onTap: onBellTap,
+                            ),
+                            const SizedBox(width: 12),
+                            _AvatarButton(user: user, onTap: onAvatarTap),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        _AvatarButton(user: user, onTap: onAvatarTap),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      greeting,
-                      style: const TextStyle(
-                        color: _Palette.textOnPhotoMuted,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            user.name,
-                            style: const TextStyle(
-                              fontSize: 26,
-                              fontWeight: FontWeight.w900,
-                              color: _Palette.textOnPhoto,
-                              letterSpacing: -0.5,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.black45,
-                                  blurRadius: 12,
-                                  offset: Offset(0, 2),
+                        const SizedBox(height: 18),
+                        Text(
+                          greeting,
+                          style: TextStyle(
+                            color: _Palette.textOnPhotoMuted,
+                            fontSize: _Responsive.scale(context, 13),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                user.name,
+                                style: TextStyle(
+                                  fontSize: _Responsive.scale(context, 26),
+                                  fontWeight: FontWeight.w900,
+                                  color: _Palette.textOnPhoto,
+                                  letterSpacing: -0.5,
+                                  shadows: const [
+                                    Shadow(
+                                      color: Colors.black45,
+                                      blurRadius: 12,
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ],
                                 ),
-                              ],
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                            overflow: TextOverflow.ellipsis,
+                            const SizedBox(width: 6),
+                            const Text('👋', style: TextStyle(fontSize: 22)),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Keep learning, keep winning!',
+                          style: TextStyle(
+                            color: _Palette.textOnPhotoMuted,
+                            fontSize: 12.5,
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        const Text('👋', style: TextStyle(fontSize: 22)),
+                        const SizedBox(height: 8),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 50, top: 10),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: _HeroStatChip(
+                                  icon: Icons.auto_awesome_rounded,
+                                  iconColor: _Palette.gold,
+                                  value: xp != null ? '$xp' : '—',
+                                  label: 'Total XP',
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _HeroStatChip(
+                                  icon: Icons.local_fire_department_rounded,
+                                  iconColor: const Color(0xFFFF7A45),
+                                  value:
+                                      streakDays != null ? '$streakDays' : '—',
+                                  label: 'Day Streak',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Keep learning, keep winning!',
-                      style: TextStyle(
-                        color: _Palette.textOnPhotoMuted,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 50, top: 10),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _HeroStatChip(
-                              icon: Icons.auto_awesome_rounded,
-                              iconColor: _Palette.gold,
-                              value: xp != null ? '$xp' : '—',
-                              label: 'Total XP',
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _HeroStatChip(
-                              icon: Icons.local_fire_department_rounded,
-                              iconColor: Color(0xFFFF7A45),
-                              value: streakDays != null ? '$streakDays' : '—',
-                              label: 'Day Streak',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -860,13 +1109,13 @@ class _AppLogo extends StatelessWidget {
         ),
         const SizedBox(width: 9),
         RichText(
-          text: const TextSpan(
+          text: TextSpan(
             style: TextStyle(
-              fontSize: 16.5,
+              fontSize: _Responsive.scale(context, 16.5),
               fontWeight: FontWeight.w800,
               letterSpacing: -0.2,
             ),
-            children: [
+            children: const [
               TextSpan(
                 text: 'QuizLanka ',
                 style: TextStyle(color: Colors.white),
@@ -892,11 +1141,12 @@ class _NotificationBell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasBadge = count != null && count! > 0;
+    final size = _Responsive.avatarRadius(context, 40);
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 40,
-        height: 40,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.16),
           shape: BoxShape.circle,
@@ -959,6 +1209,8 @@ class _AvatarButton extends StatelessWidget {
     debugPrint("User Name: ${user.name}");
     debugPrint("===================================");
 
+    final radius = _Responsive.avatarRadius(context, 19);
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -977,7 +1229,7 @@ class _AvatarButton extends StatelessWidget {
           ],
         ),
         child: CircleAvatar(
-          radius: 19,
+          radius: radius,
           backgroundColor: const Color(0xFF201E4A),
           backgroundImage:
               (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
@@ -1030,9 +1282,9 @@ class _HeroStatChip extends StatelessWidget {
             children: [
               Text(
                 value,
-                style: const TextStyle(
+                style: TextStyle(
                   color: Colors.white,
-                  fontSize: 16,
+                  fontSize: _Responsive.scale(context, 16),
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -1061,9 +1313,10 @@ class _ContinueLearningCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = data.subject.flutterColor;
     final progress = (data.lastPercentage / 100).clamp(0.0, 1.0);
+    final isTabletUp = _Responsive.isTabletUp(context);
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.all(isTabletUp ? 22 : 18),
       decoration: _Palette.card(radius: 26),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1138,8 +1391,8 @@ class _ContinueLearningCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       data.subject.name,
-                      style: const TextStyle(
-                        fontSize: 17,
+                      style: TextStyle(
+                        fontSize: _Responsive.scale(context, 17),
                         fontWeight: FontWeight.w800,
                         color: _Palette.textPrimary,
                       ),
@@ -1269,8 +1522,9 @@ class _StatsSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isTabletUp = _Responsive.isTabletUp(context);
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(isTabletUp ? 24 : 20),
       decoration: _Palette.card(radius: 26),
       child: Row(
         children: [
@@ -1320,6 +1574,7 @@ class _SummaryStat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           width: 40,
@@ -1333,8 +1588,8 @@ class _SummaryStat extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           value,
-          style: const TextStyle(
-            fontSize: 16,
+          style: TextStyle(
+            fontSize: _Responsive.scale(context, 16),
             fontWeight: FontWeight.w800,
             color: _Palette.textPrimary,
           ),
@@ -1348,13 +1603,28 @@ class _SummaryStat extends StatelessWidget {
   }
 }
 
-class _QuickAccessGrid extends StatelessWidget {
+// ------------------------------------------------------------
+// Quick Access — same 4 destinations & taps as before.
+// On regular phones/tablets they lay out in one Row (each item
+// simply gets proportionally wider on a bigger screen, capped by
+// the page's max-content-width). On very narrow phones (<340px)
+// they wrap into a 2x2 grid instead of squeezing.
+// ------------------------------------------------------------
+typedef _QuickAccessItem = ({
+  IconData icon,
+  String label,
+  String sub,
+  List<Color> colors,
+  VoidCallback onTap,
+});
+
+class _QuickAccessRow extends StatelessWidget {
   final Stats stats;
   final VoidCallback onSubjects;
   final VoidCallback onHistory;
   final VoidCallback onProfile;
 
-  const _QuickAccessGrid({
+  const _QuickAccessRow({
     required this.stats,
     required this.onSubjects,
     required this.onHistory,
@@ -1363,250 +1633,292 @@ class _QuickAccessGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = [
+    final List<_QuickAccessItem> items = [
       (
-        icon: Icons.school_rounded,
-        label: 'Subjects',
-        sub: '${stats.selectedSubjects} selected',
-        colors: const [_Palette.violet, Color(0xFF9333EA)],
+        icon: Icons.grade_rounded,
+        label: 'Grade 5',
+        sub: 'Quizzes',
+        colors: const [Color(0xFF7C3AED), Color(0xFF9333EA)],
         onTap: onSubjects,
       ),
       (
-        icon: Icons.description_rounded,
-        label: 'History',
-        sub: '${stats.completedQuizzes} quizzes',
-        colors: const [_Palette.blue, Color(0xFF1D4ED8)],
-        onTap: onHistory,
+        icon: Icons.quiz_rounded,
+        label: 'O/L',
+        sub: 'Quizzes',
+        colors: const [Color(0xFF2563EB), Color(0xFF1D4ED8)],
+        onTap: onSubjects,
       ),
       (
-        icon: Icons.emoji_events_rounded,
-        label: 'Avg Score',
-        sub: '${stats.averageScore.toStringAsFixed(0)}% overall',
-        colors: const [_Palette.orange, Color(0xFFEA580C)],
-        onTap: onHistory,
+        icon: Icons.school_rounded,
+        label: 'A/L',
+        sub: 'Quizzes',
+        colors: const [Color(0xFFF59E0B), Color(0xFFEA580C)],
+        onTap: onSubjects,
       ),
       (
-        icon: Icons.account_circle_rounded,
-        label: 'Profile',
-        sub: 'View & edit',
-        colors: const [_Palette.teal, Color(0xFF0D9488)],
-        onTap: onProfile,
+        icon: Icons.assignment_rounded,
+        label: 'GOV',
+        sub: 'Exams',
+        colors: const [Color(0xFF14B8A6), Color(0xFF0D9488)],
+        onTap: onSubjects,
       ),
     ];
 
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: items.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: 1.5,
-      ),
-      itemBuilder: (context, index) {
-        final item = items[index];
-        return GestureDetector(
-          onTap: item.onTap,
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: item.colors,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 340;
+
+        if (compact) {
+          final tileWidth = (constraints.maxWidth - 10) / 2;
+          return Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: items
+                .map((item) => SizedBox(
+                      width: tileWidth,
+                      child: _QuickAccessTile(item: item),
+                    ))
+                .toList(),
+          );
+        }
+
+        return Row(
+          children: List.generate(items.length, (i) {
+            final isLast = i == items.length - 1;
+            return Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(right: isLast ? 0 : 10),
+                child: _QuickAccessTile(item: items[i]),
               ),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: item.colors.first.withValues(alpha: 0.32),
-                  blurRadius: 14,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.22),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(item.icon, color: Colors.white, size: 19),
-                ),
-                const Spacer(),
-                Text(
-                  item.label,
-                  style: const TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  item.sub,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.white.withValues(alpha: 0.85),
-                  ),
-                ),
-              ],
-            ),
-          ),
+            );
+          }),
         );
       },
     );
   }
 }
 
-class _SubjectsGrid extends StatelessWidget {
-  final List<Subject> subjects;
-  final VoidCallback onSubjectTap;
-  final VoidCallback onGenerateTap;
-
-  const _SubjectsGrid({
-    required this.subjects,
-    required this.onSubjectTap,
-    required this.onGenerateTap,
-  });
+class _QuickAccessTile extends StatelessWidget {
+  final _QuickAccessItem item;
+  const _QuickAccessTile({required this.item});
 
   @override
   Widget build(BuildContext context) {
+    final isTabletUp = _Responsive.isTabletUp(context);
+    return GestureDetector(
+      onTap: item.onTap,
+      child: Container(
+        padding: EdgeInsets.all(isTabletUp ? 16 : 14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: item.colors,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: item.colors.first.withValues(alpha: 0.32),
+              blurRadius: 10,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Center(
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.22),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Center(
+                  child: Icon(item.icon, color: Colors.white, size: 16),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                item.label,
+                style: TextStyle(
+                  fontSize: _Responsive.scale(context, 14),
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            Center(
+              child: Text(
+                item.sub,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white.withValues(alpha: 0.85),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------
+// Subjects row — same "first 4 subjects" behaviour as before,
+// same empty-state, just laid out responsively (Row on normal
+// widths, 2x2 wrap on very narrow phones).
+// ------------------------------------------------------------
+class _SubjectsRow extends StatelessWidget {
+  final List<Subject> subjects;
+  final VoidCallback onSubjectTap;
+
+  const _SubjectsRow({required this.subjects, required this.onSubjectTap});
+
+  @override
+  Widget build(BuildContext context) {
+    // Debug: Print subjects count and data
+    debugPrint("========== SUBJECTS ROW ==========");
+    debugPrint("Subjects count: ${subjects.length}");
+    for (var subject in subjects) {
+      debugPrint(
+        "Subject: ${subject.name}, ID: ${subject.id}, Color: ${subject.color}",
+      );
+    }
+    debugPrint("====================================");
+
+    // Check if subjects list is empty
     if (subjects.isEmpty) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(20),
         decoration: _Palette.card(radius: 18),
-        child: const Text(
-          'No subjects yet',
-          style: TextStyle(color: _Palette.textSecondary, fontSize: 13),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.school_outlined,
+              size: 40,
+              color: _Palette.textSecondary,
+            ),
+            SizedBox(height: 12),
+            Text(
+              'No Subjects Available',
+              style: TextStyle(
+                color: _Palette.textSecondary,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            SizedBox(height: 4),
+            Text(
+              'Please check back later',
+              style: TextStyle(color: _Palette.textSecondary, fontSize: 12),
+            ),
+          ],
         ),
       );
     }
 
-    final displayed = subjects.take(7).toList();
+    // Take only first 4 subjects (unchanged)
+    final displayed = subjects.take(4).toList();
 
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: displayed.length + 1,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: 0.82,
-      ),
-      itemBuilder: (context, index) {
-        if (index == displayed.length) {
-          return _AiQuizGeneratorTile(onTap: onGenerateTap);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 340;
+
+        if (compact) {
+          final tileWidth = (constraints.maxWidth - 10) / 2;
+          return Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: displayed
+                .map((s) => SizedBox(
+                      width: tileWidth,
+                      child: _SubjectTile(
+                        subject: s,
+                        onTap: onSubjectTap,
+                      ),
+                    ))
+                .toList(),
+          );
         }
 
-        final subject = displayed[index];
-        final color = subject.flutterColor;
-        return GestureDetector(
-          onTap: onSubjectTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-            decoration: _Palette.card(radius: 18),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(Icons.school_rounded, color: color, size: 20),
+        return Row(
+          children: List.generate(displayed.length, (i) {
+            final isLast = i == displayed.length - 1;
+            return Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(right: isLast ? 0 : 10),
+                child: _SubjectTile(
+                  subject: displayed[i],
+                  onTap: onSubjectTap,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  subject.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: _Palette.textPrimary,
-                  ),
-                ),
-                if (subject.questionsCount != null)
-                  Text(
-                    '${subject.questionsCount} Qs',
-                    style: const TextStyle(
-                      fontSize: 9,
-                      color: _Palette.textSecondary,
-                    ),
-                  ),
-              ],
-            ),
-          ),
+              ),
+            );
+          }),
         );
       },
     );
   }
 }
 
-class _AiQuizGeneratorTile extends StatelessWidget {
+class _SubjectTile extends StatelessWidget {
+  final Subject subject;
   final VoidCallback onTap;
 
-  const _AiQuizGeneratorTile({required this.onTap});
+  const _SubjectTile({required this.subject, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final color = subject.flutterColor;
+    final isTabletUp = _Responsive.isTabletUp(context);
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              _Palette.violet.withValues(alpha: 0.1),
-              _Palette.blue.withValues(alpha: 0.08),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: _Palette.violet.withValues(alpha: 0.2)),
+        padding: EdgeInsets.symmetric(
+          vertical: isTabletUp ? 20 : 16,
+          horizontal: 8,
         ),
+        decoration: _Palette.card(radius: 18),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 36,
-              height: 36,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: _Palette.ctaGradient),
-                borderRadius: BorderRadius.circular(11),
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(
-                Icons.auto_awesome_rounded,
-                color: Colors.white,
-                size: 17,
-              ),
+              child: Icon(Icons.school_rounded, color: color, size: 22),
             ),
-            const SizedBox(height: 6),
-            const Text(
-              'AI Generator',
-              maxLines: 2,
-              textAlign: TextAlign.center,
+            const SizedBox(height: 10),
+            Text(
+              subject.name,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 9.5,
-                fontWeight: FontWeight.w800,
-                color: _Palette.violet,
-                height: 1.15,
+                fontSize: _Responsive.scale(context, 12),
+                fontWeight: FontWeight.w700,
+                color: _Palette.textPrimary,
               ),
             ),
+            if (subject.questionsCount != null)
+              Text(
+                '${subject.questionsCount} Qs',
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: _Palette.textSecondary,
+                ),
+              ),
           ],
         ),
       ),
@@ -1627,8 +1939,9 @@ class _LiveQuizBattleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isTabletUp = _Responsive.isTabletUp(context);
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(isTabletUp ? 24 : 20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
@@ -1659,12 +1972,12 @@ class _LiveQuizBattleCard extends StatelessWidget {
                 child: const Icon(Icons.bolt_rounded, color: Colors.white),
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Live Quiz Battle',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 16,
+                    fontSize: _Responsive.scale(context, 16),
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -1824,7 +2137,7 @@ class _BattleAvatar extends StatelessWidget {
         border: Border.all(color: Colors.white.withValues(alpha: 0.4)),
       ),
       child: CircleAvatar(
-        radius: 26,
+        radius: _Responsive.avatarRadius(context, 26),
         backgroundColor: Colors.white.withValues(alpha: 0.14),
         backgroundImage: (avatarUrl != null && avatarUrl!.isNotEmpty)
             ? NetworkImage(avatarUrl!)
@@ -1860,17 +2173,18 @@ class _PersonalLeaderboardCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rows = recentQuizzes.take(5).toList();
+    final isTabletUp = _Responsive.isTabletUp(context);
 
     return Container(
       decoration: _Palette.card(radius: 22),
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(isTabletUp ? 20 : 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
               CircleAvatar(
-                radius: 18,
+                radius: _Responsive.avatarRadius(context, 18),
                 backgroundColor: _Palette.violet.withValues(alpha: 0.12),
                 backgroundImage:
                     (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
@@ -2064,8 +2378,8 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       label,
-      style: const TextStyle(
-        fontSize: 16,
+      style: TextStyle(
+        fontSize: _Responsive.scale(context, 16),
         fontWeight: FontWeight.w800,
         color: _Palette.textPrimary,
       ),

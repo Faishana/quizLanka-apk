@@ -10,6 +10,66 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ============================================================
+// 1b. LIGHT THEME PALETTE (local to this screen)
+// ------------------------------------------------------------
+// This screen previously relied on AppTheme's dark palette
+// (AppTheme.backgroundGradient, AppTheme.violet, AppTheme.cyan,
+// AppTheme.textPrimary/Secondary, AppTheme.glassCard). Since
+// appTheam.dart isn't part of this file, the light-theme colors
+// and shadows are defined here so the screen is self-contained.
+// If you want this to apply app-wide, mirror these values into
+// AppTheme itself.
+// ============================================================
+class _LightTheme {
+  // Background: soft white -> pale blue gradient
+  static const List<Color> backgroundGradient = [
+    Color(0xFFFAFBFF),
+    Color(0xFFEAF0FF),
+  ];
+
+  // Accent colors (kept blue/violet family, tuned for light bg)
+  static const Color primaryBlue = Color(0xFF3D5CFF);
+  static const Color accentCyan = Color(0xFF2FB6C9);
+  static const Color violet = Color(0xFF6C5CE7);
+  static const Color danger = Color(0xFFE05A5A);
+
+  // Text
+  static const Color textPrimary = Color(0xFF1B2440);
+  static const Color textSecondary = Color(0xFF6B7A99);
+
+  // Surfaces
+  static const Color surface = Colors.white;
+  static const Color surfaceMuted = Color(0xFFF3F6FF);
+  static const Color border = Color(0xFFDCE4FF);
+
+  // The signature "blue shadow" used across cards
+  static List<BoxShadow> blueShadow({
+    double blur = 24,
+    double spread = 0,
+    Offset offset = const Offset(0, 10),
+    double opacity = 0.18,
+  }) {
+    return [
+      BoxShadow(
+        color: primaryBlue.withValues(alpha: opacity),
+        blurRadius: blur,
+        spreadRadius: spread,
+        offset: offset,
+      ),
+    ];
+  }
+
+  static BoxDecoration card({double radius = 20}) {
+    return BoxDecoration(
+      color: surface,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: border),
+      boxShadow: blueShadow(),
+    );
+  }
+}
+
+// ============================================================
 // 2. MODELS — with debug prints
 // ============================================================
 class LeaderboardResponse {
@@ -215,10 +275,15 @@ class _AvatarWidget extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: AppTheme.violet.withValues(alpha: 0.18),
+        color: _LightTheme.primaryBlue.withValues(alpha: 0.10),
         border: borderColor != null
             ? Border.all(color: borderColor!, width: borderWidth)
-            : null,
+            : Border.all(color: _LightTheme.border, width: 1),
+        boxShadow: _LightTheme.blueShadow(
+          blur: 12,
+          offset: const Offset(0, 4),
+          opacity: 0.12,
+        ),
       ),
       child: hasValidAvatar
           ? ClipOval(
@@ -231,7 +296,7 @@ class _AvatarWidget extends StatelessWidget {
                   debugPrint("Error loading avatar: $error");
                   return Icon(
                     Icons.person,
-                    color: AppTheme.violet,
+                    color: _LightTheme.primaryBlue,
                     size: size * 0.5,
                   );
                 },
@@ -243,14 +308,18 @@ class _AvatarWidget extends StatelessWidget {
                       height: size * 0.4,
                       child: const CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: AppTheme.violet,
+                        color: _LightTheme.primaryBlue,
                       ),
                     ),
                   );
                 },
               ),
             )
-          : Icon(Icons.person, color: AppTheme.violet, size: size * 0.5),
+          : Icon(
+              Icons.person,
+              color: _LightTheme.primaryBlue,
+              size: size * 0.5,
+            ),
     );
   }
 }
@@ -314,13 +383,13 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
     super.build(context);
 
     return Scaffold(
-      backgroundColor: AppTheme.backgroundGradient.first,
+      backgroundColor: _LightTheme.backgroundGradient.first,
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: AppTheme.backgroundGradient,
+            colors: _LightTheme.backgroundGradient,
           ),
         ),
         child: Stack(
@@ -328,12 +397,12 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
             Positioned(
               top: -60,
               right: -60,
-              child: _GlowBlob(color: AppTheme.violet, size: 240),
+              child: _GlowBlob(color: _LightTheme.primaryBlue, size: 240),
             ),
             Positioned(
               top: 140,
               left: -70,
-              child: _GlowBlob(color: AppTheme.cyan, size: 200),
+              child: _GlowBlob(color: _LightTheme.accentCyan, size: 200),
             ),
             SafeArea(
               bottom: false,
@@ -351,7 +420,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
                     child: _isLoading
                         ? const Center(
                             child: CircularProgressIndicator(
-                              color: AppTheme.violet,
+                              color: _LightTheme.primaryBlue,
                             ),
                           )
                         : _error != null
@@ -411,7 +480,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen>
 // ============================================================
 
 // ------------------------------------------------------------
-// 6.0 Ambient glow blob
+// 6.0 Ambient glow blob (softened for light bg)
 // ------------------------------------------------------------
 class _GlowBlob extends StatelessWidget {
   const _GlowBlob({required this.color, required this.size});
@@ -426,7 +495,7 @@ class _GlowBlob extends StatelessWidget {
         height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: color.withValues(alpha: 0.18),
+          color: color.withValues(alpha: 0.10),
         ),
       ),
     );
@@ -461,7 +530,7 @@ class _Header extends StatelessWidget {
             style: TextStyle(
               fontSize: 19,
               fontWeight: FontWeight.w800,
-              color: AppTheme.textPrimary,
+              color: _LightTheme.textPrimary,
             ),
           ),
           const Spacer(),
@@ -485,11 +554,16 @@ class _CircleIconButton extends StatelessWidget {
         width: 40,
         height: 40,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
+          color: _LightTheme.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          border: Border.all(color: _LightTheme.border),
+          boxShadow: _LightTheme.blueShadow(
+            blur: 10,
+            offset: const Offset(0, 3),
+            opacity: 0.12,
+          ),
         ),
-        child: Icon(icon, color: Colors.white, size: 18),
+        child: Icon(icon, color: _LightTheme.primaryBlue, size: 18),
       ),
     );
   }
@@ -515,13 +589,13 @@ class _ErrorWidget extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: AppTheme.danger.withValues(alpha: 0.14),
+                color: _LightTheme.danger.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
                 Icons.error_outline,
                 size: 36,
-                color: AppTheme.danger,
+                color: _LightTheme.danger,
               ),
             ),
             const SizedBox(height: 16),
@@ -530,7 +604,7 @@ class _ErrorWidget extends StatelessWidget {
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.textPrimary,
+                color: _LightTheme.textPrimary,
               ),
             ),
             const SizedBox(height: 8),
@@ -539,7 +613,7 @@ class _ErrorWidget extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 14,
-                color: AppTheme.textSecondary,
+                color: _LightTheme.textSecondary,
               ),
             ),
             const SizedBox(height: 20),
@@ -552,9 +626,14 @@ class _ErrorWidget extends StatelessWidget {
                 ),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
-                    colors: [AppTheme.violet, AppTheme.cyan],
+                    colors: [_LightTheme.primaryBlue, _LightTheme.accentCyan],
                   ),
                   borderRadius: BorderRadius.circular(12),
+                  boxShadow: _LightTheme.blueShadow(
+                    blur: 16,
+                    offset: const Offset(0, 6),
+                    opacity: 0.30,
+                  ),
                 ),
                 child: const Text(
                   'Try Again',
@@ -589,12 +668,18 @@ class _MyRankHero extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            AppTheme.violet.withValues(alpha: 0.32),
-            AppTheme.cyan.withValues(alpha: 0.12),
+            _LightTheme.primaryBlue.withValues(alpha: 0.10),
+            _LightTheme.accentCyan.withValues(alpha: 0.06),
           ],
         ),
+        color: _LightTheme.surface,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+        border: Border.all(color: _LightTheme.border),
+        boxShadow: _LightTheme.blueShadow(
+          blur: 28,
+          offset: const Offset(0, 12),
+          opacity: 0.16,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -605,7 +690,7 @@ class _MyRankHero extends StatelessWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.14),
+                  color: _LightTheme.primaryBlue.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Center(
@@ -618,7 +703,7 @@ class _MyRankHero extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
+                  color: _LightTheme.textPrimary,
                 ),
               ),
               const Spacer(),
@@ -628,8 +713,15 @@ class _MyRankHero extends StatelessWidget {
                   vertical: 7,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.16),
+                  gradient: const LinearGradient(
+                    colors: [_LightTheme.primaryBlue, _LightTheme.accentCyan],
+                  ),
                   borderRadius: BorderRadius.circular(20),
+                  boxShadow: _LightTheme.blueShadow(
+                    blur: 12,
+                    offset: const Offset(0, 4),
+                    opacity: 0.28,
+                  ),
                 ),
                 child: Text(
                   '#${rank.rank}',
@@ -679,7 +771,10 @@ class _MyRankHero extends StatelessWidget {
       children: [
         Text(
           label,
-          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          style: const TextStyle(
+            fontSize: 12,
+            color: _LightTheme.textSecondary,
+          ),
         ),
         Text(
           value,
@@ -687,7 +782,7 @@ class _MyRankHero extends StatelessWidget {
           style: const TextStyle(
             fontSize: 22,
             fontWeight: FontWeight.w800,
-            color: AppTheme.textPrimary,
+            color: _LightTheme.textPrimary,
           ),
         ),
       ],
@@ -702,8 +797,9 @@ class _MyRankHero extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.1),
+        color: _LightTheme.surfaceMuted,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _LightTheme.border),
       ),
       child: Row(
         children: [
@@ -711,7 +807,10 @@ class _MyRankHero extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            style: const TextStyle(
+              fontSize: 12,
+              color: _LightTheme.textSecondary,
+            ),
           ),
           const SizedBox(width: 4),
           Text(
@@ -719,7 +818,7 @@ class _MyRankHero extends StatelessWidget {
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary,
+              color: _LightTheme.textPrimary,
             ),
           ),
         ],
@@ -736,9 +835,9 @@ class _Podium extends StatelessWidget {
 
   const _Podium({required this.players});
 
-  static const _gold = Color(0xFFFFD24C);
-  static const _silver = Color(0xFFC7CCD8);
-  static const _bronze = Color(0xFFE0985B);
+  static const _gold = Color(0xFFE8A93B);
+  static const _silver = Color(0xFF9AA6C4);
+  static const _bronze = Color(0xFFC97B45);
 
   @override
   Widget build(BuildContext context) {
@@ -753,7 +852,7 @@ class _Podium extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
-      decoration: AppTheme.glassCard(radius: 24),
+      decoration: _LightTheme.card(radius: 24),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -818,13 +917,16 @@ class _Podium extends StatelessWidget {
             style: const TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary,
+              color: _LightTheme.textPrimary,
             ),
           ),
         ),
         Text(
           '${player.xp} XP',
-          style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+          style: const TextStyle(
+            fontSize: 10,
+            color: _LightTheme.textSecondary,
+          ),
         ),
         const SizedBox(height: 10),
         Container(
@@ -835,12 +937,17 @@ class _Podium extends StatelessWidget {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                medalColor.withValues(alpha: 0.5),
-                medalColor.withValues(alpha: 0.14),
+                medalColor.withValues(alpha: 0.35),
+                medalColor.withValues(alpha: 0.08),
               ],
             ),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-            border: Border.all(color: medalColor.withValues(alpha: 0.5)),
+            border: Border.all(color: medalColor.withValues(alpha: 0.55)),
+            boxShadow: _LightTheme.blueShadow(
+              blur: 14,
+              offset: const Offset(0, 6),
+              opacity: 0.10,
+            ),
           ),
           alignment: Alignment.topCenter,
           padding: const EdgeInsets.only(top: 10),
@@ -869,16 +976,21 @@ class _CategoryTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: AppTheme.glassCard(radius: 22),
+      decoration: _LightTheme.card(radius: 22),
       child: TabBar(
         controller: tabController,
         labelColor: Colors.white,
-        unselectedLabelColor: AppTheme.textSecondary,
+        unselectedLabelColor: _LightTheme.textSecondary,
         indicator: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [AppTheme.violet, AppTheme.cyan],
+            colors: [_LightTheme.primaryBlue, _LightTheme.accentCyan],
           ),
           borderRadius: BorderRadius.circular(14),
+          boxShadow: _LightTheme.blueShadow(
+            blur: 14,
+            offset: const Offset(0, 5),
+            opacity: 0.28,
+          ),
         ),
         indicatorSize: TabBarIndicatorSize.tab,
         indicatorPadding: const EdgeInsets.all(4),
@@ -920,7 +1032,7 @@ class _LeaderboardList extends StatelessWidget {
       return const Center(
         child: Text(
           'No players found',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(color: _LightTheme.textSecondary, fontSize: 14),
         ),
       );
     }
@@ -954,13 +1066,18 @@ class _PlayerTile extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: isTopThree
-              ? AppTheme.violet.withValues(alpha: 0.1)
-              : Colors.white.withValues(alpha: 0.06),
+              ? _LightTheme.primaryBlue.withValues(alpha: 0.06)
+              : _LightTheme.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isTopThree
-                ? AppTheme.violet.withValues(alpha: 0.35)
-                : Colors.white.withValues(alpha: 0.1),
+                ? _LightTheme.primaryBlue.withValues(alpha: 0.30)
+                : _LightTheme.border,
+          ),
+          boxShadow: _LightTheme.blueShadow(
+            blur: 16,
+            offset: const Offset(0, 6),
+            opacity: isTopThree ? 0.14 : 0.08,
           ),
         ),
         child: Row(
@@ -973,7 +1090,9 @@ class _PlayerTile extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: isTopThree ? AppTheme.violet : AppTheme.textSecondary,
+                  color: isTopThree
+                      ? _LightTheme.primaryBlue
+                      : _LightTheme.textSecondary,
                 ),
               ),
             ),
@@ -989,7 +1108,7 @@ class _PlayerTile extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
+                      color: _LightTheme.textPrimary,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -998,7 +1117,7 @@ class _PlayerTile extends StatelessWidget {
                     player.school,
                     style: const TextStyle(
                       fontSize: 12,
-                      color: AppTheme.textSecondary,
+                      color: _LightTheme.textSecondary,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -1014,14 +1133,14 @@ class _PlayerTile extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
+                    color: _LightTheme.textPrimary,
                   ),
                 ),
                 Text(
                   'Level ${player.level}',
                   style: const TextStyle(
                     fontSize: 12,
-                    color: AppTheme.textSecondary,
+                    color: _LightTheme.textSecondary,
                   ),
                 ),
               ],
