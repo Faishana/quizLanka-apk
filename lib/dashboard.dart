@@ -12,6 +12,7 @@ import 'package:quiz_lanka/ProfileScreen.dart';
 import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/quiz_history_screen.dart';
 import 'package:quiz_lanka/subjects_screen.dart';
+import 'package:quiz_lanka/past_paper_subject_selection_screen.dart';
 
 // ============================================================
 // 2. MODELS  (unchanged — same fields, same parsing, same features)
@@ -587,6 +588,19 @@ class _DashboardScreenState extends State<DashboardScreen>
     ).then((_) => _refresh());
   }
 
+  void _navigateToPastPapers({
+    required String category,
+    required String title,
+  }) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            PastPaperSubjectSelectionScreen(category: category, title: title),
+      ),
+    );
+  }
+
   @override
   bool get wantKeepAlive => true;
 
@@ -666,7 +680,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                     MainAxisAlignment.spaceBetween,
                                 children: [
                                   const _SectionTitle('Quick Access'),
-                                  _ViewAllButton(onTap: _navigateToSubjects),
+                                  //_ViewAllButton(onTap: _navigateToSubjects),
                                 ],
                               ),
                               const SizedBox(height: 12),
@@ -674,8 +688,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 stats: data.stats,
                                 onSubjects: _navigateToSubjects,
                                 onHistory: _navigateToHistory,
-                                onProfile: () =>
-                                    _navigateToProfile(data.user),
+                                onProfile: () => _navigateToProfile(data.user),
+                                onPastPapers: _navigateToPastPapers,
                               ),
                               const SizedBox(height: 26),
                               Row(
@@ -1059,8 +1073,9 @@ class _HeroHeader extends StatelessWidget {
                                 child: _HeroStatChip(
                                   icon: Icons.local_fire_department_rounded,
                                   iconColor: const Color(0xFFFF7A45),
-                                  value:
-                                      streakDays != null ? '$streakDays' : '—',
+                                  value: streakDays != null
+                                      ? '$streakDays'
+                                      : '—',
                                   label: 'Day Streak',
                                 ),
                               ),
@@ -1604,11 +1619,7 @@ class _SummaryStat extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Quick Access — same 4 destinations & taps as before.
-// On regular phones/tablets they lay out in one Row (each item
-// simply gets proportionally wider on a bigger screen, capped by
-// the page's max-content-width). On very narrow phones (<340px)
-// they wrap into a 2x2 grid instead of squeezing.
+// Quick Access — now redirects to Past Papers screens.
 // ------------------------------------------------------------
 typedef _QuickAccessItem = ({
   IconData icon,
@@ -1623,12 +1634,15 @@ class _QuickAccessRow extends StatelessWidget {
   final VoidCallback onSubjects;
   final VoidCallback onHistory;
   final VoidCallback onProfile;
+  final void Function({required String category, required String title})
+  onPastPapers;
 
   const _QuickAccessRow({
     required this.stats,
     required this.onSubjects,
     required this.onHistory,
     required this.onProfile,
+    required this.onPastPapers,
   });
 
   @override
@@ -1637,30 +1651,34 @@ class _QuickAccessRow extends StatelessWidget {
       (
         icon: Icons.grade_rounded,
         label: 'Grade 5',
-        sub: 'Quizzes',
+        sub: 'Past Papers',
         colors: const [Color(0xFF7C3AED), Color(0xFF9333EA)],
-        onTap: onSubjects,
+        onTap: () =>
+            onPastPapers(category: 'primary', title: 'Grade 5 Past Papers'),
       ),
       (
         icon: Icons.quiz_rounded,
         label: 'O/L',
-        sub: 'Quizzes',
+        sub: 'Past Papers',
         colors: const [Color(0xFF2563EB), Color(0xFF1D4ED8)],
-        onTap: onSubjects,
+        onTap: () => onPastPapers(category: 'ol', title: 'O/L Past Papers'),
       ),
       (
         icon: Icons.school_rounded,
         label: 'A/L',
-        sub: 'Quizzes',
+        sub: 'Past Papers',
         colors: const [Color(0xFFF59E0B), Color(0xFFEA580C)],
-        onTap: onSubjects,
+        onTap: () => onPastPapers(category: 'al', title: 'A/L Past Papers'),
       ),
       (
         icon: Icons.assignment_rounded,
         label: 'GOV',
-        sub: 'Exams',
+        sub: 'Past Papers',
         colors: const [Color(0xFF14B8A6), Color(0xFF0D9488)],
-        onTap: onSubjects,
+        onTap: () => onPastPapers(
+          category: 'government',
+          title: 'Government Exam Past Papers',
+        ),
       ),
     ];
 
@@ -1674,10 +1692,12 @@ class _QuickAccessRow extends StatelessWidget {
             spacing: 10,
             runSpacing: 10,
             children: items
-                .map((item) => SizedBox(
-                      width: tileWidth,
-                      child: _QuickAccessTile(item: item),
-                    ))
+                .map(
+                  (item) => SizedBox(
+                    width: tileWidth,
+                    child: _QuickAccessTile(item: item),
+                  ),
+                )
                 .toList(),
           );
         }
@@ -1838,13 +1858,12 @@ class _SubjectsRow extends StatelessWidget {
             spacing: 10,
             runSpacing: 10,
             children: displayed
-                .map((s) => SizedBox(
-                      width: tileWidth,
-                      child: _SubjectTile(
-                        subject: s,
-                        onTap: onSubjectTap,
-                      ),
-                    ))
+                .map(
+                  (s) => SizedBox(
+                    width: tileWidth,
+                    child: _SubjectTile(subject: s, onTap: onSubjectTap),
+                  ),
+                )
                 .toList(),
           );
         }
@@ -1855,10 +1874,7 @@ class _SubjectsRow extends StatelessWidget {
             return Expanded(
               child: Padding(
                 padding: EdgeInsets.only(right: isLast ? 0 : 10),
-                child: _SubjectTile(
-                  subject: displayed[i],
-                  onTap: onSubjectTap,
-                ),
+                child: _SubjectTile(subject: displayed[i], onTap: onSubjectTap),
               ),
             );
           }),

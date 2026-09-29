@@ -15,6 +15,7 @@ import 'package:http/http.dart' as http;
 import 'package:quiz_lanka/Login.dart';
 
 import 'package:quiz_lanka/config/api_config.dart';
+import 'package:quiz_lanka/past_paper_language_selection_screen.dart';
 
 // ============================================================
 // 1. MODEL
@@ -238,22 +239,14 @@ class _PastPaperSubjectSelectionScreenState
   // ==========================================================
 
   void _openSubject(PastPaperSubject subject) {
-    /*
-     * Next step:
-     *
-     * Navigate to the Past Paper List screen
-     * for this subject.
-     *
-     * We intentionally do not connect this
-     * navigation yet.
-     */
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: _Palette.textPrimary,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        content: Text('${subject.name} past papers coming next.'),
-        duration: const Duration(seconds: 1),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PastPaperLanguageSelectionScreen(
+          subjectId: subject.id,
+          subjectName: subject.name,
+          category: widget.category,
+        ),
       ),
     );
   }

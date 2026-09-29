@@ -98,9 +98,13 @@ class ApiConfig {
   static const String version = '1.0.0';
 
   // ============================
-// Past Papers
-// ============================
+  // Past Papers
+  // ============================
 
-  static const String pastPaperSubjects =
-      '/past-papers/subjects';
+  static const String pastPaperSubjects ='/past-papers/subjects';
+  static const String pastPaperList = '/past-papers/list';
+  static String pastPaperDetails(int paperId) => '/past-papers/$paperId';
+  static String pastPaperSubmit(int paperId) => '/past-papers/$paperId/submit';
+
+  
 }
