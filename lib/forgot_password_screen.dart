@@ -48,14 +48,6 @@ class _LightTheme {
     ];
   }
 
-  static BoxDecoration card({double radius = 20}) {
-    return BoxDecoration(
-      color: surface,
-      borderRadius: BorderRadius.circular(radius),
-      border: Border.all(color: border),
-      boxShadow: blueShadow(),
-    );
-  }
 }
 
 // ─────────────────────────────────────────────

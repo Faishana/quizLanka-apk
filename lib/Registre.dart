@@ -1,6 +1,8 @@
 // ignore_for_file: file_names
 
 import 'dart:convert';
+import 'dart:ui';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
@@ -9,7 +11,7 @@ import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/main_navigation.dart';
 
 // ============================================================
-// DESIGN TOKENS — "Aurora Glass" theme (matches Login/Onboarding)
+// DESIGN TOKENS — "Aurora Glass" theme (matches LoginScreen)
 // ============================================================
 class _RegisterTokens {
   _RegisterTokens._();
@@ -20,17 +22,18 @@ class _RegisterTokens {
     Color(0xFF1D1B4B),
   ];
 
-  static const Color violet = Color(0xFF9B6BFF);
-  static const Color cyan = Color(0xFF3FB4FF);
+  static const Color violet = Color(0xFF9B7BFF);
+  static const Color cyan = Color(0xFF4FC3FF);
   static const Color textPrimary = Colors.white;
-  static const Color textSecondary = Color(0xFFB9B6D9);
+  static const Color textSecondary = Color(0xFFD6D3F0);
+  static const Color danger = Color(0xFFFF8A8A);
 
-  static const double fieldRadius = 14;
+  static const double fieldRadius = 16;
   static const double cardRadius = 28;
 
   static const List<Color> strengthColors = [
     Color(0xFF4B4870),
-    Color(0xFFFF7A7A),
+    Color(0xFFFF8A8A),
     Color(0xFFFFB020),
     Color(0xFFF5D742),
     Color(0xFF3FE0A0),
@@ -38,7 +41,50 @@ class _RegisterTokens {
 }
 
 // ============================================================
-// REGISTER SCREEN — redesigned UI, identical behavior
+// USER TYPE ENUM
+// ============================================================
+enum UserType { student, governmentExamCandidate }
+
+extension UserTypeX on UserType {
+  String get apiValue {
+    switch (this) {
+      case UserType.student:
+        return 'Student';
+      case UserType.governmentExamCandidate:
+        return 'Government Exam Candidate';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case UserType.student:
+        return 'Student';
+      case UserType.governmentExamCandidate:
+        return 'Government Exam Candidate';
+    }
+  }
+
+  String get subtitle {
+    switch (this) {
+      case UserType.student:
+        return 'School student preparing for O/L or A/L';
+      case UserType.governmentExamCandidate:
+        return 'Preparing for government competitive exams';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case UserType.student:
+        return Icons.school_rounded;
+      case UserType.governmentExamCandidate:
+        return Icons.menu_book_rounded;
+    }
+  }
+}
+
+// ============================================================
+// REGISTER SCREEN
 // ============================================================
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -49,7 +95,6 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen>
     with SingleTickerProviderStateMixin {
-  // ── controllers ────────────────────────────────────────────
   final _formKey = GlobalKey<FormState>();
   final _fullNameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -57,19 +102,50 @@ class _RegisterScreenState extends State<RegisterScreen>
   final _confirmPasswordController = TextEditingController();
   final _schoolController = TextEditingController();
 
-  // ── state ──────────────────────────────────────────────────
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
   bool _agreeToTerms = false;
   bool _isLoading = false;
   String _selectedProvince = 'Western Province';
 
+  UserType _userType = UserType.student;
+  bool get _isStudent => _userType == UserType.student;
+
+  AutovalidateMode _autovalidateMode = AutovalidateMode.disabled;
+
   late AnimationController _animController;
-  late Animation<Offset> _slideAnimation;
-  late Animation<double> _fadeAnimation;
+  late Animation<double> _cardSlide;
+  late Animation<double> _cardFade;
 
   List<dynamic> _grades = [];
   int? _selectedGradeId;
+  String? _selectedAlStream;
+
+  static const List<Map<String, String>> _alStreams = [
+    {'value': 'bio', 'label': 'Biological Science'},
+    {'value': 'maths', 'label': 'Mathematics'},
+    {'value': 'technology', 'label': 'Technology'},
+    {'value': 'arts', 'label': 'Arts'},
+    {'value': 'commerce', 'label': 'Commerce'},
+  ];
+
+  Map<String, dynamic>? get _selectedGrade {
+    for (final item in _grades) {
+      if (item is Map &&
+          item['id'].toString() == _selectedGradeId?.toString()) {
+        return Map<String, dynamic>.from(item);
+      }
+    }
+    return null;
+  }
+
+  bool get _isALGrade {
+    final category = (_selectedGrade?['category'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    return category == 'al';
+  }
 
   final List<String> _provinces = [
     'Western Province',
@@ -83,7 +159,6 @@ class _RegisterScreenState extends State<RegisterScreen>
     'Sabaragamuwa Province',
   ];
 
-  // ── lifecycle ──────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
@@ -93,15 +168,10 @@ class _RegisterScreenState extends State<RegisterScreen>
       vsync: this,
       duration: const Duration(milliseconds: 700),
     );
-
-    _slideAnimation =
-        Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(
-          CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
-        );
-
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+    _cardSlide = Tween<double>(begin: 40, end: 0).animate(
       CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
     );
+    _cardFade = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
 
     _animController.forward();
   }
@@ -117,13 +187,10 @@ class _RegisterScreenState extends State<RegisterScreen>
     super.dispose();
   }
 
-  // ── API calls — unchanged ───────────────────────────────────
   Future<void> _loadGrades() async {
     try {
       final url = '${ApiConfig.baseUrl}${ApiConfig.grades}';
-
       final response = await http.get(Uri.parse(url));
-
       final data = jsonDecode(response.body);
 
       debugPrint("GRADES API RESPONSE:");
@@ -133,22 +200,27 @@ class _RegisterScreenState extends State<RegisterScreen>
         setState(() {
           _grades = data['data'] ?? [];
         });
-
-        debugPrint(_grades.toString());
       }
     } catch (e) {
       debugPrint(e.toString());
     }
   }
 
-  // ── register handler — unchanged ────────────────────────────
+  // ── REGISTER HANDLER — FIXED to match backend contract ─────
   Future<void> _handleRegister() async {
-    debugPrint("REGISTER GRADE ID = $_selectedGradeId");
+    setState(() => _autovalidateMode = AutovalidateMode.onUserInteraction);
 
-    if (_selectedGradeId == null) {
+    if (_isStudent && _selectedGradeId == null) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Please select your grade')));
+      return;
+    }
+
+    if (_isStudent && _isALGrade && _selectedAlStream == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select your A/L stream')),
+      );
       return;
     }
 
@@ -159,22 +231,48 @@ class _RegisterScreenState extends State<RegisterScreen>
       return;
     }
 
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
 
     try {
       final authProvider = context.read<AuthProvider>();
+
+      // ✅ FIXED: non-students send `null` (backend validates as nullable),
+      //            not 0 / '' which break the DB / validation.
+      final int? gradeIdToSend = _isStudent ? _selectedGradeId : null;
+
+      final String? schoolToSend = _isStudent
+          ? (_schoolController.text.trim().isEmpty
+                ? null
+                : _schoolController.text.trim())
+          : null;
+
+      final String? districtToSend = _selectedProvince.trim().isEmpty
+          ? null
+          : _selectedProvince.trim();
+
+      // Only A/L students send an al_stream value.
+      final String? alStreamToSend = (_isStudent && _isALGrade)
+          ? _selectedAlStream
+          : null;
+
+      debugPrint(
+        "REGISTER → category=${_userType.apiValue}, "
+        "grade=$gradeIdToSend, school='$schoolToSend', "
+        "district='$districtToSend', al_stream='$alStreamToSend'",
+      );
+
       final success = await authProvider.register(
         _fullNameController.text.trim(),
         _emailController.text.trim(),
         _passwordController.text.trim(),
         _confirmPasswordController.text.trim(),
-        _selectedGradeId!,
-        _schoolController.text.trim(),
-        _selectedProvince,
+        gradeIdToSend,
+        schoolToSend,
+        districtToSend,
+        _userType.apiValue,
+        alStreamToSend,
       );
 
       setState(() => _isLoading = false);
@@ -187,7 +285,6 @@ class _RegisterScreenState extends State<RegisterScreen>
             duration: Duration(seconds: 2),
           ),
         );
-
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const MainNavigation()),
@@ -210,7 +307,6 @@ class _RegisterScreenState extends State<RegisterScreen>
     }
   }
 
-  // ── password strength — unchanged logic ─────────────────────
   int _getPasswordStrength() {
     final pass = _passwordController.text;
     int strength = 0;
@@ -230,186 +326,452 @@ class _RegisterScreenState extends State<RegisterScreen>
     return _RegisterTokens.strengthColors[strength];
   }
 
-  // ── build UI ─────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       resizeToAvoidBottomInset: true,
       backgroundColor: _RegisterTokens.backgroundGradient.first,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: _RegisterTokens.backgroundGradient,
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Image.asset(
+              'assets/login_bg.png',
+              fit: BoxFit.cover,
+              errorBuilder: (_, error, stackTrace) => Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: _RegisterTokens.backgroundGradient,
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
-        child: Stack(
-          children: [
-            Positioned(
-              top: -70,
-              right: -50,
-              child: _GlowBlob(color: _RegisterTokens.violet, size: 260),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.55),
+                    Colors.black.withValues(alpha: 0.25),
+                    Colors.black.withValues(alpha: 0.65),
+                  ],
+                  stops: const [0.0, 0.35, 1.0],
+                ),
+              ),
             ),
-            Positioned(
-              bottom: -60,
-              left: -50,
-              child: _GlowBlob(color: _RegisterTokens.cyan, size: 220),
-            ),
-            SafeArea(
-              child: Column(
-                children: [
-                  _TopBar(onBack: () => Navigator.pop(context)),
-                  Expanded(
-                    child: FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: SlideTransition(
-                        position: _slideAnimation,
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+          ),
+          SafeArea(
+            child: SingleChildScrollView(
+              physics: const ClampingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: AnimatedBuilder(
+                animation: _animController,
+                builder: (_, child) => Opacity(
+                  opacity: _cardFade.value,
+                  child: Transform.translate(
+                    offset: Offset(0, _cardSlide.value),
+                    child: child,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () => Navigator.pop(context),
                           child: Container(
-                            padding: const EdgeInsets.all(24),
+                            width: 42,
+                            height: 42,
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.06),
-                              borderRadius: BorderRadius.circular(
-                                _RegisterTokens.cardRadius,
-                              ),
+                              color: Colors.white.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.12),
+                                color: Colors.white.withValues(alpha: 0.18),
                               ),
                             ),
-                            child: Form(
-                              key: _formKey,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const _HeaderBlock(),
-                                  const SizedBox(height: 22),
-                                  const _SectionLabel('Personal Information'),
-                                  const SizedBox(height: 12),
-                                  _GlassTextField(
-                                    controller: _fullNameController,
-                                    label: 'Full Name',
-                                    icon: Icons.person_outline,
-                                    hint: 'Enter your full name',
-                                    validator: (value) {
-                                      if (value == null || value.isEmpty) {
-                                        return 'Please enter your name';
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                  const SizedBox(height: 12),
-                                  _GlassTextField(
-                                    controller: _emailController,
-                                    label: 'Email Address',
-                                    icon: Icons.mail_outline,
-                                    hint: 'Enter your email',
-                                    keyboardType: TextInputType.emailAddress,
-                                    validator: (value) {
-                                      if (value == null || value.isEmpty) {
-                                        return 'Please enter your email';
-                                      }
-                                      if (!value.contains('@')) {
-                                        return 'Please enter a valid email';
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                  const SizedBox(height: 20),
-                                  const _SectionLabel('Academic Information'),
-                                  const SizedBox(height: 12),
-                                  _GlassTextField(
-                                    controller: _schoolController,
-                                    label: 'School Name',
-                                    icon: Icons.school_outlined,
-                                    hint: 'Enter your school name',
-                                    validator: (value) {
-                                      if (value == null || value.isEmpty) {
-                                        return 'Please enter your school name';
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                  const SizedBox(height: 12),
-                                  _buildGradeDropdown(),
-                                  const SizedBox(height: 12),
-                                  _buildProvinceDropdown(),
-                                  const SizedBox(height: 20),
-                                  const _SectionLabel('Create Password'),
-                                  const SizedBox(height: 12),
-                                  _GlassTextField(
-                                    controller: _passwordController,
-                                    label: 'Password',
-                                    icon: Icons.lock_outline,
-                                    hint: 'Min. 8 characters',
-                                    isPassword: true,
-                                    obscure: _obscurePassword,
-                                    onToggle: () => setState(
-                                      () =>
-                                          _obscurePassword = !_obscurePassword,
-                                    ),
-                                    validator: (value) {
-                                      if (value == null || value.isEmpty) {
-                                        return 'Please enter a password';
-                                      }
-                                      if (value.length < 8) {
-                                        return 'Password must be at least 8 characters';
-                                      }
-                                      return null;
-                                    },
-                                    onChanged: (_) => setState(() {}),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  _buildPasswordStrength(),
-                                  const SizedBox(height: 12),
-                                  _GlassTextField(
-                                    controller: _confirmPasswordController,
-                                    label: 'Confirm Password',
-                                    icon: Icons.lock_outline,
-                                    hint: 'Re-enter your password',
-                                    isPassword: true,
-                                    obscure: _obscureConfirm,
-                                    onToggle: () => setState(
-                                      () => _obscureConfirm = !_obscureConfirm,
-                                    ),
-                                    validator: (value) {
-                                      if (value == null || value.isEmpty) {
-                                        return 'Please confirm your password';
-                                      }
-                                      if (value != _passwordController.text) {
-                                        return 'Passwords do not match';
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                  const SizedBox(height: 20),
-                                  _buildTermsCheckbox(),
-                                  const SizedBox(height: 22),
-                                  _buildRegisterButton(),
-                                  const SizedBox(height: 18),
-                                  _buildSocialSection(),
-                                  const SizedBox(height: 20),
-                                  _buildLoginLink(),
-                                ],
-                              ),
+                            child: const Icon(
+                              Icons.arrow_back_ios_new,
+                              color: Colors.white,
+                              size: 18,
                             ),
                           ),
                         ),
-                      ),
+                        const Spacer(),
+                        const _BrandMark(),
+                        const Spacer(),
+                        const SizedBox(width: 42),
+                      ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 20),
+                    _buildFormCard(),
+                    const SizedBox(height: 24),
+                  ],
+                ),
               ),
             ),
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFormCard() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(_RegisterTokens.cardRadius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1B1740).withValues(alpha: 0.62),
+            borderRadius: BorderRadius.circular(_RegisterTokens.cardRadius),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 30,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: Form(
+            key: _formKey,
+            autovalidateMode: _autovalidateMode,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Create Your Account',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                    color: _RegisterTokens.textPrimary,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Join 50,000+ Sri Lankan learners',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    color: _RegisterTokens.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 22),
+
+                const _SectionLabel('I am a'),
+                const SizedBox(height: 12),
+                _buildUserTypeSelector(),
+                const SizedBox(height: 20),
+
+                const _SectionLabel('Personal Information'),
+                const SizedBox(height: 12),
+                _GlassTextField(
+                  controller: _fullNameController,
+                  hint: 'Full Name',
+                  icon: Icons.person_outline_rounded,
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Enter your full name';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                _GlassTextField(
+                  controller: _emailController,
+                  hint: 'Email Address',
+                  icon: Icons.mail_outline_rounded,
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Enter your email';
+                    if (!v.contains('@')) return 'Enter a valid email';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+
+                const _SectionLabel('Academic Information'),
+                const SizedBox(height: 12),
+
+                if (_isStudent) ...[
+                  _buildGradeDropdown(),
+                  if (_isALGrade) ...[
+                    const SizedBox(height: 12),
+                    _buildAlStreamDropdown(),
+                  ],
+                  const SizedBox(height: 12),
+                  _GlassTextField(
+                    controller: _schoolController,
+                    hint: 'School Name',
+                    icon: Icons.school_outlined,
+                    validator: (v) {
+                      if (v == null || v.isEmpty) {
+                        return 'Enter your school name';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                _buildProvinceDropdown(),
+                const SizedBox(height: 20),
+
+                const _SectionLabel('Create Password'),
+                const SizedBox(height: 12),
+                _GlassTextField(
+                  controller: _passwordController,
+                  hint: 'Password (min. 8 chars)',
+                  icon: Icons.lock_outline_rounded,
+                  obscure: _obscurePassword,
+                  suffix: IconButton(
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      color: _RegisterTokens.textSecondary,
+                      size: 20,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Enter a password';
+                    if (v.length < 8) return 'Minimum 8 characters';
+                    return null;
+                  },
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: 8),
+                _buildPasswordStrength(),
+                const SizedBox(height: 12),
+                _GlassTextField(
+                  controller: _confirmPasswordController,
+                  hint: 'Confirm Password',
+                  icon: Icons.lock_outline_rounded,
+                  obscure: _obscureConfirm,
+                  suffix: IconButton(
+                    icon: Icon(
+                      _obscureConfirm
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      color: _RegisterTokens.textSecondary,
+                      size: 20,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscureConfirm = !_obscureConfirm),
+                  ),
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Confirm your password';
+                    if (v != _passwordController.text) {
+                      return 'Passwords do not match';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+
+                _buildTermsCheckbox(),
+                const SizedBox(height: 22),
+
+                _GradientButton(
+                  label: 'Create Account',
+                  isLoading: _isLoading,
+                  enabled: _agreeToTerms,
+                  onTap: _handleRegister,
+                ),
+                const SizedBox(height: 18),
+
+                Center(
+                  child: RichText(
+                    text: TextSpan(
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: _RegisterTokens.textSecondary,
+                      ),
+                      children: [
+                        const TextSpan(text: 'Already have an account? '),
+                        TextSpan(
+                          text: 'Login',
+                          style: const TextStyle(
+                            color: _RegisterTokens.cyan,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          recognizer: TapGestureRecognizer()
+                            ..onTap = () => Navigator.pushReplacement(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const LoginScreen(),
+                              ),
+                            ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.verified_user_outlined,
+                      color: _RegisterTokens.violet.withValues(alpha: 0.95),
+                      size: 14,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Your data is secure with us',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: _RegisterTokens.violet.withValues(alpha: 0.95),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  // ── data-bound components kept as instance methods since they
-  //    read _grades / _selectedGradeId / _selectedProvince state ──
+  Widget _buildUserTypeSelector() {
+    return Column(
+      children: UserType.values.map((type) {
+        final selected = _userType == type;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: GestureDetector(
+            onTap: () {
+              if (_userType == type) return;
+              setState(() {
+                _userType = type;
+                if (!_isStudent) {
+                  _selectedGradeId = null;
+                  _selectedAlStream = null;
+                  _schoolController.clear();
+                }
+              });
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: selected
+                    ? _RegisterTokens.violet.withValues(alpha: 0.20)
+                    : Colors.white.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: selected
+                      ? _RegisterTokens.violet
+                      : Colors.white.withValues(alpha: 0.16),
+                  width: selected ? 1.6 : 1.0,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      gradient: selected
+                          ? const LinearGradient(
+                              colors: [
+                                _RegisterTokens.violet,
+                                _RegisterTokens.cyan,
+                              ],
+                            )
+                          : null,
+                      color: selected
+                          ? null
+                          : Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      type.icon,
+                      color: selected
+                          ? Colors.white
+                          : _RegisterTokens.textSecondary,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          type.label,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: selected
+                                ? _RegisterTokens.textPrimary
+                                : _RegisterTokens.textPrimary.withValues(
+                                    alpha: 0.85,
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          type.subtitle,
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            color: _RegisterTokens.textSecondary,
+                            fontWeight: FontWeight.w400,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: selected
+                          ? _RegisterTokens.violet
+                          : Colors.transparent,
+                      border: Border.all(
+                        color: selected
+                            ? _RegisterTokens.violet
+                            : _RegisterTokens.textSecondary.withValues(
+                                alpha: 0.5,
+                              ),
+                        width: 1.6,
+                      ),
+                    ),
+                    child: selected
+                        ? const Center(
+                            child: Icon(
+                              Icons.check,
+                              size: 12,
+                              color: Colors.white,
+                            ),
+                          )
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
 
   Widget _buildGradeDropdown() {
     return _GlassDropdownShell(
@@ -420,33 +782,82 @@ class _RegisterScreenState extends State<RegisterScreen>
           hint: Text(
             'Select Grade',
             style: TextStyle(
-              color: _RegisterTokens.textSecondary.withValues(alpha: 0.8),
+              color: _RegisterTokens.textSecondary.withValues(alpha: 0.85),
+              fontSize: 14,
             ),
           ),
           isExpanded: true,
-          items: _grades.map((grade) {
-            return DropdownMenuItem<int>(
-              value: grade['id'],
-              child: Text(
-                grade['name'] ?? 'Grade ${grade['id']}',
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: _RegisterTokens.textPrimary,
+          isDense: true,
+          underline: const SizedBox.shrink(),
+          items: _grades
+              .map(
+                (g) => DropdownMenuItem<int>(
+                  value: g['id'],
+                  child: Text(
+                    g['name'] ?? 'Grade ${g['id']}',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: _RegisterTokens.textPrimary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
-              ),
-            );
-          }).toList(),
-          onChanged: (value) {
-            debugPrint("Selected Grade ID = $value");
-            setState(() => _selectedGradeId = value);
+              )
+              .toList(),
+          onChanged: (v) {
+            setState(() {
+              _selectedGradeId = v;
+              // A stream must be selected again whenever the grade changes.
+              _selectedAlStream = null;
+            });
           },
-          style: const TextStyle(
-            fontSize: 13,
-            color: _RegisterTokens.textPrimary,
-          ),
           dropdownColor: const Color(0xFF201E4A),
           icon: Icon(
-            Icons.keyboard_arrow_down,
+            Icons.keyboard_arrow_down_rounded,
+            color: _RegisterTokens.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAlStreamDropdown() {
+    return _GlassDropdownShell(
+      icon: Icons.menu_book_rounded,
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _selectedAlStream,
+          hint: Text(
+            'Select A/L Stream',
+            style: TextStyle(
+              color: _RegisterTokens.textSecondary.withValues(alpha: 0.85),
+              fontSize: 14,
+            ),
+          ),
+          isExpanded: true,
+          isDense: true,
+          underline: const SizedBox.shrink(),
+          items: _alStreams
+              .map(
+                (stream) => DropdownMenuItem<String>(
+                  value: stream['value'],
+                  child: Text(
+                    stream['label']!,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: _RegisterTokens.textPrimary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+          onChanged: (value) {
+            setState(() => _selectedAlStream = value);
+          },
+          dropdownColor: const Color(0xFF201E4A),
+          icon: Icon(
+            Icons.keyboard_arrow_down_rounded,
             color: _RegisterTokens.textSecondary,
           ),
         ),
@@ -461,26 +872,27 @@ class _RegisterScreenState extends State<RegisterScreen>
         child: DropdownButton<String>(
           value: _selectedProvince,
           isExpanded: true,
-          items: _provinces.map((province) {
-            return DropdownMenuItem<String>(
-              value: province,
-              child: Text(
-                province,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: _RegisterTokens.textPrimary,
+          isDense: true,
+          underline: const SizedBox.shrink(),
+          items: _provinces
+              .map(
+                (p) => DropdownMenuItem<String>(
+                  value: p,
+                  child: Text(
+                    p,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: _RegisterTokens.textPrimary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
-              ),
-            );
-          }).toList(),
-          onChanged: (value) => setState(() => _selectedProvince = value!),
-          style: const TextStyle(
-            fontSize: 13,
-            color: _RegisterTokens.textPrimary,
-          ),
+              )
+              .toList(),
+          onChanged: (v) => setState(() => _selectedProvince = v!),
           dropdownColor: const Color(0xFF201E4A),
           icon: Icon(
-            Icons.keyboard_arrow_down,
+            Icons.keyboard_arrow_down_rounded,
             color: _RegisterTokens.textSecondary,
           ),
         ),
@@ -489,13 +901,11 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   Widget _buildPasswordStrength() {
+    if (_passwordController.text.isEmpty) return const SizedBox.shrink();
+
     final strength = _getPasswordStrength();
     final label = _getStrengthLabel(strength);
     final color = _getStrengthColor(strength);
-
-    if (_passwordController.text.isEmpty) {
-      return const SizedBox.shrink();
-    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -529,7 +939,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                 decoration: BoxDecoration(
                   color: i < strength
                       ? color
-                      : Colors.white.withValues(alpha: 0.1),
+                      : Colors.white.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -556,204 +966,55 @@ class _RegisterScreenState extends State<RegisterScreen>
         children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 200),
-            width: 22,
-            height: 22,
+            width: 20,
+            height: 20,
+            margin: const EdgeInsets.only(top: 2),
             decoration: BoxDecoration(
               color: _agreeToTerms
                   ? _RegisterTokens.violet
                   : Colors.transparent,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(5),
               border: Border.all(
                 color: _agreeToTerms
                     ? _RegisterTokens.violet
-                    : Colors.white.withValues(alpha: 0.3),
+                    : _RegisterTokens.textSecondary,
                 width: 1.5,
               ),
             ),
             child: _agreeToTerms
-                ? const Icon(Icons.check, size: 14, color: Colors.white)
+                ? const Icon(Icons.check, size: 13, color: Colors.white)
                 : null,
           ),
           const SizedBox(width: 10),
           Expanded(
             child: RichText(
               text: TextSpan(
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 12,
                   color: _RegisterTokens.textSecondary,
+                  height: 1.5,
                 ),
                 children: [
                   const TextSpan(text: 'I agree to the '),
                   TextSpan(
                     text: 'Terms of Service',
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: _RegisterTokens.cyan,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
+                    recognizer: TapGestureRecognizer()..onTap = () {},
                   ),
                   const TextSpan(text: ' and '),
                   TextSpan(
                     text: 'Privacy Policy',
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: _RegisterTokens.cyan,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
+                    recognizer: TapGestureRecognizer()..onTap = () {},
                   ),
-                  const TextSpan(
-                    text:
-                        '. I understand my data will be used to personalize my learning experience.',
-                  ),
+                  const TextSpan(text: '.'),
                 ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRegisterButton() {
-    return GestureDetector(
-      onTap: _isLoading ? null : _handleRegister,
-      child: Container(
-        height: 56,
-        decoration: BoxDecoration(
-          gradient: _agreeToTerms
-              ? const LinearGradient(
-                  colors: [_RegisterTokens.violet, _RegisterTokens.cyan],
-                )
-              : LinearGradient(
-                  colors: [
-                    Colors.white.withValues(alpha: 0.12),
-                    Colors.white.withValues(alpha: 0.08),
-                  ],
-                ),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: _agreeToTerms
-              ? [
-                  BoxShadow(
-                    color: _RegisterTokens.violet.withValues(alpha: 0.4),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
-                  ),
-                ]
-              : [],
-        ),
-        child: Center(
-          child: _isLoading
-              ? const CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2,
-                )
-              : Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Create Account',
-                      style: TextStyle(
-                        color: _agreeToTerms
-                            ? Colors.white
-                            : _RegisterTokens.textSecondary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Icon(
-                      Icons.arrow_forward_ios,
-                      color: _agreeToTerms
-                          ? Colors.white
-                          : _RegisterTokens.textSecondary,
-                      size: 14,
-                    ),
-                  ],
-                ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSocialSection() {
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Divider(color: Colors.white.withValues(alpha: 0.14)),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(
-                'or sign up with',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.4),
-                  fontSize: 12,
-                ),
-              ),
-            ),
-            Expanded(
-              child: Divider(color: Colors.white.withValues(alpha: 0.14)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: _GlassSocialButton(
-                label: 'Google',
-                icon: Icons.g_mobiledata,
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Google Sign In coming soon!'),
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _GlassSocialButton(
-                label: 'Apple',
-                icon: Icons.apple,
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Apple Sign In coming soon!')),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLoginLink() {
-    return Center(
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            'Already have an account? ',
-            style: TextStyle(
-              fontSize: 13,
-              color: _RegisterTokens.textSecondary,
-            ),
-          ),
-          GestureDetector(
-            onTap: () => Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const LoginScreen()),
-            ),
-            child: Text(
-              'Login',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: _RegisterTokens.violet,
               ),
             ),
           ),
@@ -764,213 +1025,64 @@ class _RegisterScreenState extends State<RegisterScreen>
 }
 
 // ============================================================
-// PRIVATE, REUSABLE, STATELESS WIDGETS
-// (extracted since they don't depend on mutable form state)
+// PRIVATE, REUSABLE WIDGETS — unchanged
 // ============================================================
 
-class _GlowBlob extends StatelessWidget {
-  const _GlowBlob({required this.color, required this.size});
-  final Color color;
-  final double size;
+class _BrandMark extends StatelessWidget {
+  const _BrandMark();
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: color.withValues(alpha: 0.18),
-      ),
-    );
-  }
-}
-
-class _TopBar extends StatelessWidget {
-  const _TopBar({required this.onBack});
-  final VoidCallback onBack;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: onBack,
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-              ),
-              child: const Icon(
-                Icons.arrow_back_ios_new,
-                color: Colors.white,
-                size: 18,
-              ),
-            ),
-          ),
-          const Spacer(),
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [_RegisterTokens.violet, _RegisterTokens.cyan],
-                  ),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.psychology_rounded,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 8),
-              RichText(
-                text: const TextSpan(
-                  children: [
-                    TextSpan(
-                      text: 'QuizLanka ',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16,
-                      ),
-                    ),
-                    TextSpan(
-                      text: 'AI',
-                      style: TextStyle(
-                        color: _RegisterTokens.violet,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          const SizedBox(width: 40),
-        ],
-      ),
-    );
-  }
-}
-
-class _HeaderBlock extends StatelessWidget {
-  const _HeaderBlock();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: _RegisterTokens.violet.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Text('🎓', style: TextStyle(fontSize: 24)),
-            ),
-            const SizedBox(width: 14),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Create Your Account',
-                    style: TextStyle(
-                      fontSize: 21,
-                      fontWeight: FontWeight.w900,
-                      color: _RegisterTokens.textPrimary,
-                    ),
-                  ),
-                  Text(
-                    'Join 50,000+ Sri Lankan students',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: _RegisterTokens.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          width: 38,
+          height: 38,
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+            gradient: const LinearGradient(
+              colors: [_RegisterTokens.violet, _RegisterTokens.cyan],
+            ),
+            borderRadius: BorderRadius.circular(11),
+            boxShadow: [
+              BoxShadow(
+                color: _RegisterTokens.violet.withValues(alpha: 0.45),
+                blurRadius: 18,
+                spreadRadius: 1,
+              ),
+            ],
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: const [
-              _StatChip(value: '50K+', label: 'Students'),
-              _StatDivider(),
-              _StatChip(value: '9', label: 'Provinces'),
-              _StatDivider(),
-              _StatChip(value: '12+', label: 'Subjects'),
-              _StatDivider(),
-              _StatChip(value: 'Free', label: 'Forever'),
+          child: const Icon(
+            Icons.psychology_rounded,
+            color: Colors.white,
+            size: 22,
+          ),
+        ),
+        const SizedBox(width: 10),
+        RichText(
+          text: const TextSpan(
+            children: [
+              TextSpan(
+                text: 'QuizLanka ',
+                style: TextStyle(
+                  color: _RegisterTokens.textPrimary,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 17,
+                  shadows: [Shadow(color: Colors.black45, blurRadius: 10)],
+                ),
+              ),
+              TextSpan(
+                text: 'AI',
+                style: TextStyle(
+                  color: _RegisterTokens.violet,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 17,
+                  shadows: [Shadow(color: Colors.black45, blurRadius: 10)],
+                ),
+              ),
             ],
           ),
         ),
       ],
-    );
-  }
-}
-
-class _StatChip extends StatelessWidget {
-  const _StatChip({required this.value, required this.label});
-  final String value;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 15,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        Text(
-          label,
-          style: const TextStyle(
-            color: _RegisterTokens.textSecondary,
-            fontSize: 10,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _StatDivider extends StatelessWidget {
-  const _StatDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 28,
-      color: Colors.white.withValues(alpha: 0.14),
     );
   }
 }
@@ -985,7 +1097,7 @@ class _SectionLabel extends StatelessWidget {
       children: [
         Container(
           width: 4,
-          height: 18,
+          height: 16,
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               begin: Alignment.topCenter,
@@ -999,9 +1111,10 @@ class _SectionLabel extends StatelessWidget {
         Text(
           label,
           style: const TextStyle(
-            fontSize: 14.5,
+            fontSize: 13.5,
             fontWeight: FontWeight.w700,
             color: _RegisterTokens.textPrimary,
+            letterSpacing: 0.2,
           ),
         ),
       ],
@@ -1012,75 +1125,84 @@ class _SectionLabel extends StatelessWidget {
 class _GlassTextField extends StatelessWidget {
   const _GlassTextField({
     required this.controller,
-    required this.label,
-    required this.icon,
     required this.hint,
-    this.isPassword = false,
-    this.obscure,
-    this.onToggle,
+    required this.icon,
     this.keyboardType = TextInputType.text,
+    this.obscure = false,
+    this.suffix,
     this.validator,
     this.onChanged,
   });
 
   final TextEditingController controller;
-  final String label;
-  final IconData icon;
   final String hint;
-  final bool isPassword;
-  final bool? obscure;
-  final VoidCallback? onToggle;
+  final IconData icon;
   final TextInputType keyboardType;
+  final bool obscure;
+  final Widget? suffix;
   final String? Function(String?)? validator;
   final void Function(String)? onChanged;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(_RegisterTokens.fieldRadius),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscure,
+      style: const TextStyle(
+        fontSize: 15,
+        color: _RegisterTokens.textPrimary,
+        fontWeight: FontWeight.w500,
       ),
-      child: TextFormField(
-        controller: controller,
-        obscureText: isPassword && (obscure ?? true),
-        keyboardType: keyboardType,
-        style: const TextStyle(
-          fontSize: 14,
-          color: _RegisterTokens.textPrimary,
+      validator: validator,
+      onChanged: onChanged,
+      cursorColor: _RegisterTokens.violet,
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(
+          color: Color(0xFFC9C6E8),
+          fontSize: 14.5,
+          fontWeight: FontWeight.w400,
         ),
-        validator: validator,
-        onChanged: onChanged,
-        cursorColor: _RegisterTokens.violet,
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: TextStyle(
-            color: _RegisterTokens.textSecondary.withValues(alpha: 0.8),
-            fontSize: 12,
+        prefixIcon: Icon(icon, color: _RegisterTokens.textSecondary, size: 20),
+        suffixIcon: suffix,
+        errorStyle: const TextStyle(
+          color: _RegisterTokens.danger,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+        filled: true,
+        fillColor: Colors.white.withValues(alpha: 0.10),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 16,
+          horizontal: 16,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(_RegisterTokens.fieldRadius),
+          borderSide: BorderSide(
+            color: Colors.white.withValues(alpha: 0.20),
+            width: 1.2,
           ),
-          hintText: hint,
-          hintStyle: TextStyle(
-            color: _RegisterTokens.textSecondary.withValues(alpha: 0.4),
-            fontSize: 13,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(_RegisterTokens.fieldRadius),
+          borderSide: const BorderSide(
+            color: _RegisterTokens.violet,
+            width: 1.8,
           ),
-          prefixIcon: Icon(icon, color: _RegisterTokens.violet, size: 20),
-          suffixIcon: isPassword && onToggle != null
-              ? IconButton(
-                  icon: Icon(
-                    (obscure ?? true)
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                    color: _RegisterTokens.textSecondary,
-                    size: 20,
-                  ),
-                  onPressed: onToggle,
-                )
-              : null,
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 14,
-            horizontal: 16,
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(_RegisterTokens.fieldRadius),
+          borderSide: BorderSide(
+            color: _RegisterTokens.danger.withValues(alpha: 0.7),
+            width: 1.3,
+          ),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(_RegisterTokens.fieldRadius),
+          borderSide: const BorderSide(
+            color: _RegisterTokens.danger,
+            width: 1.8,
           ),
         ),
       ),
@@ -1088,8 +1210,6 @@ class _GlassTextField extends StatelessWidget {
   }
 }
 
-/// Shared glass shell used by both dropdowns so they visually match
-/// the text fields above them.
 class _GlassDropdownShell extends StatelessWidget {
   const _GlassDropdownShell({required this.icon, required this.child});
   final IconData icon;
@@ -1098,16 +1218,19 @@ class _GlassDropdownShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
+        color: Colors.white.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(_RegisterTokens.fieldRadius),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.20),
+          width: 1.2,
+        ),
       ),
       child: Row(
         children: [
-          Icon(icon, color: _RegisterTokens.violet, size: 20),
-          const SizedBox(width: 12),
+          Icon(icon, color: _RegisterTokens.textSecondary, size: 20),
+          const SizedBox(width: 10),
           Expanded(child: child),
         ],
       ),
@@ -1115,41 +1238,86 @@ class _GlassDropdownShell extends StatelessWidget {
   }
 }
 
-class _GlassSocialButton extends StatelessWidget {
-  const _GlassSocialButton({
+class _GradientButton extends StatelessWidget {
+  const _GradientButton({
     required this.label,
-    required this.icon,
+    required this.isLoading,
     required this.onTap,
+    this.enabled = true,
   });
+
   final String label;
-  final IconData icon;
+  final bool isLoading;
   final VoidCallback onTap;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
+    final canTap = enabled && !isLoading;
+
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 50,
+      onTap: canTap ? onTap : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        height: 54,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          gradient: enabled
+              ? const LinearGradient(
+                  colors: [_RegisterTokens.violet, _RegisterTokens.cyan],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                )
+              : LinearGradient(
+                  colors: [
+                    Colors.white.withValues(alpha: 0.14),
+                    Colors.white.withValues(alpha: 0.10),
+                  ],
+                ),
+          borderRadius: BorderRadius.circular(27),
+          boxShadow: enabled
+              ? [
+                  BoxShadow(
+                    color: _RegisterTokens.violet.withValues(alpha: 0.45),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : [],
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 20, color: Colors.white),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: _RegisterTokens.textPrimary,
-              ),
-            ),
-          ],
+        child: Center(
+          child: isLoading
+              ? const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2.5,
+                  ),
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: enabled
+                            ? Colors.white
+                            : _RegisterTokens.textSecondary,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.chevron_right,
+                      color: enabled
+                          ? Colors.white
+                          : _RegisterTokens.textSecondary,
+                      size: 22,
+                    ),
+                  ],
+                ),
         ),
       ),
     );

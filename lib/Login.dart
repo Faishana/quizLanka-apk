@@ -60,36 +60,51 @@ class TokenStorage {
 }
 
 // ============================================================
-// USER MODEL — unchanged
+// USER MODEL — updated with userCategory + alStream
 // ============================================================
 class User {
   final int? id;
   final String? name;
   final String? email;
+  final String? userCategory; // 'Student' | 'Government Exam Candidate'
   final int? gradeId;
   final String? school;
   final String? district;
+  final String? alStream; // 👈 NEW
   final String? role;
 
   User({
     this.id,
     this.name,
     this.email,
+    this.userCategory,
     this.gradeId,
     this.school,
     this.district,
+    this.alStream, // 👈 NEW
     this.role,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
+    // `grade_id` may come as a top-level field OR nested under `grade.id`
+    // (backend returns both shapes depending on the endpoint).
+    final nestedGrade = json['grade'];
+    final gradeIdFromNested = (nestedGrade is Map && nestedGrade['id'] is int)
+        ? nestedGrade['id'] as int
+        : null;
+
     return User(
-      id: json['id'],
-      name: json['name'],
-      email: json['email'],
-      gradeId: json['grade_id'],
-      school: json['school'],
-      district: json['district'],
-      role: json['role'],
+      id: json['id'] is int ? json['id'] as int : null,
+      name: json['name'] as String?,
+      email: json['email'] as String?,
+      userCategory: json['user_category'] as String?,
+      gradeId: (json['grade_id'] is int)
+          ? json['grade_id'] as int
+          : gradeIdFromNested,
+      school: json['school'] as String?,
+      district: json['district'] as String?,
+      alStream: json['al_stream'] as String?, // 👈 NEW
+      role: json['role'] as String?,
     );
   }
 
@@ -98,16 +113,22 @@ class User {
       'id': id,
       'name': name,
       'email': email,
+      'user_category': userCategory,
       'grade_id': gradeId,
       'school': school,
       'district': district,
+      'al_stream': alStream, // 👈 NEW
       'role': role,
     };
   }
+
+  bool get isStudent => userCategory == 'Student';
+  bool get isGovernmentExamCandidate =>
+      userCategory == 'Government Exam Candidate';
 }
 
 // ============================================================
-// AUTH SERVICE — unchanged
+// AUTH SERVICE — register updated for category + nullable fields + alStream
 // ============================================================
 class AuthService {
   final http.Client _client = http.Client();
@@ -145,26 +166,38 @@ class AuthService {
     }
   }
 
+  /// Registers a new user.
+  ///
+  /// [gradeId], [school], [district], [alStream] are nullable because
+  /// Government Exam Candidates don't have a grade/school and non-A/L
+  /// students don't have a stream. They are omitted from the payload
+  /// when null/empty so the backend's `nullable` validation passes cleanly.
   Future<Map<String, dynamic>> register(
     String name,
     String email,
     String password,
     String passwordConfirmation,
-    int gradeId,
-    String school,
-    String district,
+    int? gradeId,
+    String? school,
+    String? district,
+    String userCategory,
+    String? alStream, // 👈 NEW
   ) async {
     try {
       final url = '${ApiConfig.baseUrl}${ApiConfig.register}';
 
-      final requestBody = {
+      final requestBody = <String, dynamic>{
         'name': name,
         'email': email,
         'password': password,
         'password_confirmation': passwordConfirmation,
-        'grade_id': gradeId,
-        'school': school,
-        'district': district,
+        'user_category': userCategory,
+        if (gradeId != null) 'grade_id': gradeId,
+        if (school != null && school.trim().isNotEmpty) 'school': school.trim(),
+        if (district != null && district.trim().isNotEmpty)
+          'district': district.trim(),
+        if (alStream != null && alStream.isNotEmpty)
+          'al_stream': alStream, // 👈 NEW
       };
 
       debugPrint('==============================');
@@ -201,8 +234,12 @@ class AuthService {
       if (response.statusCode == 422) {
         final errors = data['errors'];
 
-        if (errors != null && errors.isNotEmpty) {
-          return {'success': false, 'message': errors.values.first.first};
+        if (errors != null && errors is Map && errors.isNotEmpty) {
+          final firstError = errors.values.first;
+          final message = firstError is List && firstError.isNotEmpty
+              ? firstError.first.toString()
+              : firstError.toString();
+          return {'success': false, 'message': message};
         }
 
         return {
@@ -263,7 +300,7 @@ class AuthService {
 }
 
 // ============================================================
-// AUTH PROVIDER — unchanged
+// AUTH PROVIDER — register updated with alStream
 // ============================================================
 class AuthProvider extends ChangeNotifier {
   final AuthService _authService = AuthService();
@@ -319,9 +356,11 @@ class AuthProvider extends ChangeNotifier {
     String email,
     String password,
     String passwordConfirmation,
-    int gradeId,
-    String school,
-    String district,
+    int? gradeId, // nullable
+    String? school, // nullable
+    String? district, // nullable
+    String selectedUserCategory,
+    String? alStream, // 👈 NEW
   ) async {
     _isLoading = true;
     _error = null;
@@ -336,6 +375,8 @@ class AuthProvider extends ChangeNotifier {
         gradeId,
         school,
         district,
+        selectedUserCategory,
+        alStream, // 👈 forwarded
       );
 
       if (result['success']) {
@@ -411,7 +452,6 @@ class _LoginTokens {
   static const Color violet = Color(0xFF9B7BFF);
   static const Color cyan = Color(0xFF4FC3FF);
   static const Color textPrimary = Colors.white;
-  // Brighter secondary so copy stays legible over busy artwork.
   static const Color textSecondary = Color(0xFFD6D3F0);
   static const Color danger = Color(0xFFFF8A8A);
 
@@ -420,7 +460,7 @@ class _LoginTokens {
 }
 
 // ============================================================
-// LOGIN SCREEN
+// LOGIN SCREEN — unchanged
 // ============================================================
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -479,8 +519,6 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleLogin(AuthProvider auth) async {
-    // Only start showing field-level red errors once the user has
-    // actually tried to submit — not on first render.
     setState(() => _autovalidateMode = AutovalidateMode.onUserInteraction);
 
     if (!_formKey.currentState!.validate()) return;
@@ -515,7 +553,6 @@ class _LoginScreenState extends State<LoginScreen>
 
           return Stack(
             children: [
-              // 1. Background artwork
               Positioned.fill(
                 child: Image.asset(
                   'assets/login_bg.png',
@@ -531,10 +568,6 @@ class _LoginScreenState extends State<LoginScreen>
                   ),
                 ),
               ),
-
-              // 2. Darkening scrim — stronger top & bottom, lighter
-              // in the middle, so text stays legible over busy art
-              // without hiding the illustration completely.
               Positioned.fill(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
@@ -551,8 +584,6 @@ class _LoginScreenState extends State<LoginScreen>
                   ),
                 ),
               ),
-
-              // 3. Safe area & form
               SafeArea(
                 child: SingleChildScrollView(
                   physics: const ClampingScrollPhysics(),
@@ -585,11 +616,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ── form card ──────────────────────────────────────────────
   Widget _buildFormCard(AuthProvider auth) {
-    // Real glassmorphism: blur what's behind the card, then lay a
-    // semi-opaque tint on top so the card reads as a solid, legible
-    // surface instead of a washed-out see-through rectangle.
     return ClipRRect(
       borderRadius: BorderRadius.circular(_LoginTokens.cardRadius),
       child: BackdropFilter(
@@ -824,7 +851,7 @@ class _LoginScreenState extends State<LoginScreen>
 }
 
 // ============================================================
-// PRIVATE, REUSABLE WIDGETS
+// PRIVATE, REUSABLE WIDGETS — unchanged
 // ============================================================
 
 class _LoadingScreen extends StatelessWidget {
@@ -847,8 +874,6 @@ class _LoadingScreen extends StatelessWidget {
   }
 }
 
-/// Logo mark + wordmark shown above the form card. Given its own
-/// soft dark backing so it stays legible over busy artwork too.
 class _BrandMark extends StatelessWidget {
   const _BrandMark();
 
@@ -961,8 +986,6 @@ class _ErrorBanner extends StatelessWidget {
   }
 }
 
-/// Glass-style text field, tuned for readability: solid-enough fill,
-/// bright hint text, and a clearly visible caret/border on focus.
 class _GlassTextField extends StatelessWidget {
   const _GlassTextField({
     required this.controller,

@@ -5,7 +5,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:quiz_lanka/config/api_config.dart';
-import 'package:quiz_lanka/config/appTheam.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -30,7 +29,6 @@ class _LightTheme {
   // Accent colors (kept blue/violet family, tuned for light bg)
   static const Color primaryBlue = Color(0xFF3D5CFF);
   static const Color accentCyan = Color(0xFF2FB6C9);
-  static const Color violet = Color(0xFF6C5CE7);
   static const Color danger = Color(0xFFE05A5A);
 
   // Text

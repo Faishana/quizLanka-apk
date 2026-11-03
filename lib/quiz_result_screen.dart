@@ -1,18 +1,34 @@
 // lib/quiz_result_screen.dart
-// QuizLanka AI — Quiz Result Screen
-// "Aurora Glass" theme (see bottombar.dart), elevated for more visual polish:
-//   - staggered fade/slide entrance for hero → stats → details → actions
-//   - custom animated gradient glow-ring instead of a flat progress ring
-//   - decorative watermark + bounce-in grade icon badge on the hero card
-//   - glowing icon chips + count-up numbers on stat cards
-//   - gradient CTA button for the primary action
-// Self-contained: models + UI in one file (no network calls — data is passed in)
-// Same public API and data logic as before — only presentation changed.
+// QuizLanka AI — Quiz Result Screen (Light Theme)
+// Same data logic, animations, and API as before.
+// Presentation-only changes: dark → light surfaces, colors adjusted
+// for WCAG AA contrast on white, hero card kept as colored anchor.
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:quiz_lanka/config/appTheam.dart';
-import 'package:quiz_lanka/quiz_review_screen.dart'; // Make sure this import is correct
+import 'package:quiz_lanka/quiz_review_screen.dart';
+
+// ─────────────────────────────────────────────
+// LIGHT THEME TOKENS (mirrors quiz_screen.dart)
+// ─────────────────────────────────────────────
+class _ResultTheme {
+  static const Color background = Color(0xFFF7F8FC);
+  static const Color surface = Colors.white;
+  static const Color surfaceMuted = Color(0xFFF1F3F9);
+  static const Color border = Color(0xFFE4E7F0);
+  static const Color borderStrong = Color(0xFFCBD1E0);
+
+  static const Color textPrimary = Color(0xFF1A1D2B);
+  static const Color textSecondary = Color(0xFF5A6072);
+  static const Color textMuted = Color(0xFF8A90A2);
+
+  static const Color success = Color(0xFF16A34A);
+  static const Color danger = Color(0xFFDC2626);
+  static const Color warning = Color(0xFFF59E0B);
+  static const Color cyan = Color(0xFF0891B2);
+  static const Color violet = Color(0xFF6C4DFF);
+}
 
 // ─────────────────────────────────────────────
 // SCREEN
@@ -96,10 +112,10 @@ class _QuizResultScreenState extends State<QuizResultScreen>
   }
 
   Color get _gradeColor {
-    if (_percentage >= 75) return AppTheme.success;
-    if (_percentage >= 50) return AppTheme.cyan;
-    if (_percentage >= 35) return AppTheme.warning;
-    return AppTheme.danger;
+    if (_percentage >= 75) return _ResultTheme.success;
+    if (_percentage >= 50) return _ResultTheme.cyan;
+    if (_percentage >= 35) return _ResultTheme.warning;
+    return _ResultTheme.danger;
   }
 
   IconData get _gradeIcon {
@@ -156,27 +172,25 @@ class _QuizResultScreenState extends State<QuizResultScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0B22),
+      backgroundColor: _ResultTheme.background,
       body: Stack(
         children: [
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: AppTheme.backgroundGradient,
-              ),
+          // Soft pastel orbs for depth — much lighter than dark-theme version
+          Positioned(
+            top: -80,
+            right: -60,
+            child: _GlowOrb(
+              color: widget.subjectColor.withValues(alpha: 0.18),
+              size: 260,
             ),
           ),
           Positioned(
-            top: -70,
-            right: -50,
-            child: _GlowOrb(color: widget.subjectColor, size: 210),
-          ),
-          Positioned(
-            bottom: -80,
-            left: -60,
-            child: _GlowOrb(color: _gradeColor, size: 200),
+            bottom: -100,
+            left: -80,
+            child: _GlowOrb(
+              color: _gradeColor.withValues(alpha: 0.14),
+              size: 260,
+            ),
           ),
           SafeArea(
             child: SingleChildScrollView(
@@ -189,19 +203,19 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                     offsetY: 28,
                     child: _buildHeroCard(),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 18),
                   _FadeSlideIn(
                     animation: _statsAnim,
                     offsetY: 24,
                     child: _buildStatsRow(),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 18),
                   _FadeSlideIn(
                     animation: _detailAnim,
                     offsetY: 24,
                     child: _buildDetailCard(),
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 28),
                   _FadeSlideIn(
                     animation: _actionsAnim,
                     offsetY: 20,
@@ -217,6 +231,9 @@ class _QuizResultScreenState extends State<QuizResultScreen>
     );
   }
 
+  // ─────────────────────────────────────────────
+  // HERO CARD — keeps colored gradient as the "score card"
+  // ─────────────────────────────────────────────
   Widget _buildHeroCard() {
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
@@ -227,24 +244,28 @@ class _QuizResultScreenState extends State<QuizResultScreen>
           gradient: LinearGradient(
             colors: [
               widget.subjectColor,
-              widget.subjectColor.withValues(alpha: 0.7),
+              widget.subjectColor.withValues(alpha: 0.72),
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
           boxShadow: [
             BoxShadow(
-              color: widget.subjectColor.withValues(alpha: 0.4),
-              blurRadius: 28,
-              offset: const Offset(0, 12),
+              color: widget.subjectColor.withValues(alpha: 0.35),
+              blurRadius: 32,
+              offset: const Offset(0, 16),
+            ),
+            BoxShadow(
+              color: widget.subjectColor.withValues(alpha: 0.15),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // Decorative oversized watermark icon for depth/premium feel.
+            // Decorative oversized watermark icon
             Positioned(
               right: -22,
               top: -18,
@@ -253,7 +274,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                 child: Icon(
                   Icons.emoji_events_rounded,
                   size: 130,
-                  color: Colors.white.withValues(alpha: 0.08),
+                  color: Colors.white.withValues(alpha: 0.10),
                 ),
               ),
             ),
@@ -290,7 +311,11 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                 const SizedBox(height: 4),
                 Text(
                   widget.subjectName,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 const SizedBox(height: 24),
                 AnimatedBuilder(
@@ -331,8 +356,12 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                                     vertical: 4,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.2),
+                                    color: Colors.white.withValues(alpha: 0.22),
                                     borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: Colors.white.withValues(alpha: 0.3),
+                                      width: 1,
+                                    ),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -370,6 +399,9 @@ class _QuizResultScreenState extends State<QuizResultScreen>
     );
   }
 
+  // ─────────────────────────────────────────────
+  // STATS ROW
+  // ─────────────────────────────────────────────
   Widget _buildStatsRow() {
     return Row(
       children: [
@@ -378,7 +410,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
             value: _correct,
             label: 'Correct',
             icon: Icons.check_circle_rounded,
-            color: AppTheme.success,
+            color: _ResultTheme.success,
           ),
         ),
         const SizedBox(width: 12),
@@ -387,7 +419,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
             value: _wrong,
             label: 'Wrong',
             icon: Icons.cancel_rounded,
-            color: AppTheme.danger,
+            color: _ResultTheme.danger,
           ),
         ),
         const SizedBox(width: 12),
@@ -396,55 +428,82 @@ class _QuizResultScreenState extends State<QuizResultScreen>
             value: _total,
             label: 'Total',
             icon: Icons.quiz_outlined,
-            color: AppTheme.cyan,
+            color: _ResultTheme.cyan,
           ),
         ),
       ],
     );
   }
 
+  // ─────────────────────────────────────────────
+  // DETAIL CARD
+  // ─────────────────────────────────────────────
   Widget _buildDetailCard() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: AppTheme.glassCard(radius: 18),
+      decoration: BoxDecoration(
+        color: _ResultTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _ResultTheme.border),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF1A1D2B).withValues(alpha: 0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
       child: Column(
         children: [
           Row(
             children: [
-              Icon(Icons.insights_rounded, color: AppTheme.violet, size: 18),
-              const SizedBox(width: 8),
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _ResultTheme.violet.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Icon(
+                  Icons.insights_rounded,
+                  color: _ResultTheme.violet,
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: 10),
               const Text(
                 'Quiz Details',
                 style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
+                  color: _ResultTheme.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           _DetailRow(
             icon: Icons.timer_outlined,
             label: 'Time Taken',
             value: _duration,
-            iconColor: AppTheme.cyan,
+            iconColor: _ResultTheme.cyan,
           ),
-          Divider(height: 24, color: Colors.white.withValues(alpha: 0.08)),
+          const _RowDivider(),
           _DetailRow(
             icon: Icons.school_outlined,
             label: 'Subject',
             value: widget.subjectName,
             iconColor: widget.subjectColor,
           ),
-          Divider(height: 24, color: Colors.white.withValues(alpha: 0.08)),
+          const _RowDivider(),
           _DetailRow(
             icon: Icons.bar_chart_rounded,
             label: 'Score',
             value: '$_correct / $_total',
-            iconColor: AppTheme.violet,
+            iconColor: _ResultTheme.violet,
           ),
-          Divider(height: 24, color: Colors.white.withValues(alpha: 0.08)),
+          const _RowDivider(),
           _DetailRow(
             icon: Icons.emoji_events_outlined,
             label: 'Performance',
@@ -457,10 +516,13 @@ class _QuizResultScreenState extends State<QuizResultScreen>
     );
   }
 
+  // ─────────────────────────────────────────────
+  // ACTIONS
+  // ─────────────────────────────────────────────
   Widget _buildActions(BuildContext context) {
     return Column(
       children: [
-        // Review Answers — gradient glow CTA
+        // Review Answers — gradient glow CTA (kept, looks great on light)
         SizedBox(
           width: double.infinity,
           height: 54,
@@ -468,13 +530,13 @@ class _QuizResultScreenState extends State<QuizResultScreen>
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
               gradient: const LinearGradient(
-                colors: [AppTheme.violet, AppTheme.cyan],
+                colors: [_ResultTheme.violet, _ResultTheme.cyan],
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: AppTheme.violet.withValues(alpha: 0.4),
+                  color: _ResultTheme.violet.withValues(alpha: 0.32),
                   blurRadius: 20,
                   offset: const Offset(0, 8),
                 ),
@@ -508,6 +570,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                           color: Colors.white,
+                          letterSpacing: 0.2,
                         ),
                       ),
                     ],
@@ -528,10 +591,11 @@ class _QuizResultScreenState extends State<QuizResultScreen>
             icon: const Icon(Icons.home_outlined, size: 20),
             label: const Text('Back to Dashboard'),
             style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.textPrimary,
-              side: BorderSide(
-                color: Colors.white.withValues(alpha: 0.16),
-                width: 1.5,
+              foregroundColor: _ResultTheme.textPrimary,
+              backgroundColor: _ResultTheme.surface,
+              side: const BorderSide(
+                color: _ResultTheme.borderStrong,
+                width: 1.4,
               ),
               padding: const EdgeInsets.symmetric(vertical: 15),
               shape: RoundedRectangleBorder(
@@ -550,11 +614,9 @@ class _QuizResultScreenState extends State<QuizResultScreen>
 }
 
 // ─────────────────────────────────────────────
-// ANIMATION HELPERS
+// ANIMATION HELPERS (unchanged)
 // ─────────────────────────────────────────────
 
-/// Fades + slides a child up into place as [animation] runs 0→1.
-/// Opacity is clamped since some curves (e.g. easeOutBack) overshoot.
 class _FadeSlideIn extends StatelessWidget {
   const _FadeSlideIn({
     required this.animation,
@@ -585,8 +647,8 @@ class _FadeSlideIn extends StatelessWidget {
   }
 }
 
-/// Gradient progress ring with a soft outer glow and a bright "handle"
-/// dot at the current progress angle — used on the hero result card.
+/// Gradient progress ring with soft outer glow + bright handle dot.
+/// (Kept identical — it renders on the colored hero card.)
 class _GlowRingPainter extends CustomPainter {
   final double progress; // 0..1
   final double strokeWidth;
@@ -613,7 +675,7 @@ class _GlowRingPainter extends CustomPainter {
     if (progress <= 0) return;
     final sweep = sweepFull * progress;
 
-    // Soft blurred glow behind the progress arc
+    // Soft blurred glow behind progress arc
     final glowPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.55)
       ..style = PaintingStyle.stroke
@@ -622,7 +684,7 @@ class _GlowRingPainter extends CustomPainter {
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
     canvas.drawArc(rect, _start, sweep, false, glowPaint);
 
-    // Crisp progress arc on top
+    // Crisp progress arc
     final progressPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
@@ -630,7 +692,7 @@ class _GlowRingPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     canvas.drawArc(rect, _start, sweep, false, progressPaint);
 
-    // Bright handle dot at the tip of the arc
+    // Handle dot at tip
     final angle = _start + sweep;
     final handleCenter = Offset(
       center.dx + radius * math.cos(angle),
@@ -669,38 +731,33 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
-      decoration: AppTheme.glassCard(radius: 16),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+      decoration: BoxDecoration(
+        color: _ResultTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _ResultTheme.border),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF1A1D2B).withValues(alpha: 0.04),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
       child: Column(
         children: [
-          // Top accent bar
-          Container(
-            width: 28,
-            height: 3,
-            margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
+          // Icon chip with soft color glow
           Container(
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.16),
+              color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: color.withValues(alpha: 0.3)),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.35),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+              border: Border.all(color: color.withValues(alpha: 0.25)),
             ),
             child: Icon(icon, color: color, size: 20),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           TweenAnimationBuilder<int>(
             tween: IntTween(begin: 0, end: value),
             duration: const Duration(milliseconds: 900),
@@ -709,9 +766,10 @@ class _StatCard extends StatelessWidget {
               return Text(
                 '$animatedValue',
                 style: const TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: _ResultTheme.textPrimary,
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
+                  height: 1.1,
                 ),
               );
             },
@@ -720,9 +778,10 @@ class _StatCard extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-              color: AppTheme.textSecondary,
+              color: _ResultTheme.textMuted,
               fontSize: 11,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.2,
             ),
           ),
         ],
@@ -751,11 +810,11 @@ class _DetailRow extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 32,
-          height: 32,
+          width: 34,
+          height: 34,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: iconColor.withValues(alpha: 0.14),
+            color: iconColor.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(icon, color: iconColor, size: 17),
@@ -763,15 +822,20 @@ class _DetailRow extends StatelessWidget {
         const SizedBox(width: 12),
         Text(
           label,
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: const TextStyle(
+            color: _ResultTheme.textSecondary,
+            fontSize: 13.5,
+            fontWeight: FontWeight.w500,
+          ),
         ),
         const Spacer(),
         Flexible(
           child: Text(
             value,
             textAlign: TextAlign.right,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: valueColor ?? AppTheme.textPrimary,
+              color: valueColor ?? _ResultTheme.textPrimary,
               fontSize: 14,
               fontWeight: FontWeight.w700,
             ),
@@ -782,7 +846,19 @@ class _DetailRow extends StatelessWidget {
   }
 }
 
-/// Soft blurred color orb used purely for background depth/atmosphere.
+class _RowDivider extends StatelessWidget {
+  const _RowDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Container(height: 1, color: _ResultTheme.border),
+    );
+  }
+}
+
+/// Soft blurred color orb used purely for background depth.
 class _GlowOrb extends StatelessWidget {
   final Color color;
   final double size;
@@ -798,10 +874,7 @@ class _GlowOrb extends StatelessWidget {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           gradient: RadialGradient(
-            colors: [
-              color.withValues(alpha: 0.25),
-              color.withValues(alpha: 0.0),
-            ],
+            colors: [color, color.withValues(alpha: 0.0)],
           ),
         ),
       ),

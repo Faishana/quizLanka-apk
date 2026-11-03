@@ -15,7 +15,7 @@ import 'package:quiz_lanka/subjects_screen.dart';
 import 'package:quiz_lanka/past_paper_subject_selection_screen.dart';
 
 // ============================================================
-// 2. MODELS  (unchanged — same fields, same parsing, same features)
+// 2. MODELS
 // ============================================================
 
 class Grade {
@@ -34,32 +34,25 @@ class User {
   final int id;
   final String name;
   final String email;
-  final String school;
-  final String district;
-  final Grade grade;
+  final String? school;
+  final String? district;
+  final Grade? grade;
   final String? avatarUrl;
+  final String? userCategory;
 
   User({
     required this.id,
     required this.name,
     required this.email,
-    required this.school,
-    required this.district,
-    required this.grade,
+    this.school,
+    this.district,
+    this.grade,
     this.avatarUrl,
+    this.userCategory,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
-    debugPrint("========== USER FROM JSON ==========");
-    debugPrint("avatar_url: ${json['avatar_url']}");
-    debugPrint("profile_image: ${json['profile_image']}");
-    debugPrint("display_avatar: ${json['display_avatar']}");
-    debugPrint("avatar: ${json['avatar']}");
-    debugPrint("profile_photo: ${json['profile_photo']}");
-    debugPrint("====================================");
-
     String? avatarUrl;
-
     if (json['display_avatar'] != null &&
         json['display_avatar'].toString().isNotEmpty) {
       avatarUrl = json['display_avatar'].toString();
@@ -76,18 +69,106 @@ class User {
       avatarUrl = json['profile_photo'].toString();
     }
 
-    debugPrint("Selected Avatar URL: $avatarUrl");
-    debugPrint("====================================");
+    Grade? parsedGrade;
+    final rawGrade = json['grade'];
+    if (rawGrade is Map<String, dynamic> &&
+        rawGrade['id'] is int &&
+        rawGrade['name'] is String) {
+      parsedGrade = Grade.fromJson(rawGrade);
+    }
 
     return User(
       id: json['id'] as int,
       name: json['name'] as String,
       email: json['email'] as String,
-      school: json['school'] as String,
-      district: json['district'] as String,
-      grade: Grade.fromJson(json['grade'] as Map<String, dynamic>),
+      school: json['school'] is String ? json['school'] as String : null,
+      district: json['district'] is String ? json['district'] as String : null,
+      grade: parsedGrade,
       avatarUrl: avatarUrl,
+      userCategory: json['user_category'] is String
+          ? json['user_category'] as String
+          : null,
     );
+  }
+
+  /// Normalized category string used for comparisons.
+  String get _normalizedCategory {
+    return (userCategory ?? '')
+        .trim()
+        .toLowerCase()
+        .replaceAll('_', ' ')
+        .replaceAll('-', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  bool get isStudent => _normalizedCategory == 'student';
+
+  bool get isGovernmentExamCandidate {
+    final c = _normalizedCategory;
+    return c == 'government exam candidate' ||
+        c == 'government exam' ||
+        c == 'gov exam candidate' ||
+        c == 'govt exam candidate' ||
+        c == 'government';
+  }
+
+  /// A user is treated as a government exam candidate when either the
+  /// explicit category matches OR they have no grade (students always do).
+  bool get _treatAsGovernment => isGovernmentExamCandidate || grade == null;
+
+  String get subtitleLabel {
+    if (_treatAsGovernment) {
+      return district != null && district!.isNotEmpty
+          ? '🎯 Government Exam Candidate · $district'
+          : '🎯 Government Exam Candidate';
+    }
+    final g = grade;
+    if (g != null) {
+      final parts = <String>[g.name];
+      if (school != null && school!.isNotEmpty) parts.add(school!);
+      return parts.join(' · ');
+    }
+    return district ?? 'QuizLanka AI learner';
+  }
+
+  /// Returns one of: 'grade5' | 'ol' | 'al' | 'government'.
+  /// Never returns null so the dashboard always renders exactly ONE tile.
+  String get pastPaperCategory {
+    // 1. Explicit government category (or no grade → government).
+    if (_treatAsGovernment) return 'government';
+
+    final gradeName = grade?.name.trim().toLowerCase() ?? '';
+
+    // 2. Grade 5 / Scholarship
+    if (gradeName.contains('grade 5') ||
+        gradeName.contains('grade-5') ||
+        gradeName.contains('grade_5') ||
+        gradeName.contains('grade 05') ||
+        gradeName == '5' ||
+        gradeName.contains('scholarship')) {
+      return 'grade5';
+    }
+
+    // 3. O/L — Grade 10 & 11
+    if (gradeName.contains('grade 10') ||
+        gradeName.contains('grade 11') ||
+        gradeName.contains('ordinary') ||
+        gradeName.contains('o/l') ||
+        gradeName.contains('ol')) {
+      return 'ol';
+    }
+
+    // 4. A/L — Grade 12 & 13
+    if (gradeName.contains('grade 12') ||
+        gradeName.contains('grade 13') ||
+        gradeName.contains('advanced') ||
+        gradeName.contains('a/l') ||
+        gradeName.contains('al')) {
+      return 'al';
+    }
+
+    // 5. Has a grade but none of the known categories → gov fallback.
+    return 'government';
   }
 }
 
@@ -108,14 +189,37 @@ class Stats {
     this.notificationsCount,
   });
 
-  factory Stats.fromJson(Map<String, dynamic> json) => Stats(
-    selectedSubjects: json['selected_subjects'] as int,
-    completedQuizzes: json['completed_quizzes'] as int,
-    averageScore: (json['average_score'] as num).toDouble(),
-    xpPoints: json['xp_points'] as int?,
-    streakDays: json['streak_days'] as int?,
-    notificationsCount: json['notifications_count'] as int?,
-  );
+  factory Stats.fromJson(Map<String, dynamic> json) {
+    int _asInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? 0;
+      return 0;
+    }
+
+    double _asDouble(dynamic v) {
+      if (v is double) return v.isFinite ? v : 0;
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v) ?? 0;
+      return 0;
+    }
+
+    int? _asNullableInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v);
+      return null;
+    }
+
+    return Stats(
+      selectedSubjects: _asInt(json['selected_subjects']),
+      completedQuizzes: _asInt(json['completed_quizzes']),
+      averageScore: _asDouble(json['average_score']),
+      xpPoints: _asNullableInt(json['xp_points']),
+      streakDays: _asNullableInt(json['streak_days']),
+      notificationsCount: _asNullableInt(json['notifications_count']),
+    );
+  }
 }
 
 class Subject {
@@ -133,13 +237,24 @@ class Subject {
     this.questionsCount,
   });
 
-  factory Subject.fromJson(Map<String, dynamic> json) => Subject(
-    id: json['id'] as int,
-    name: json['name'] as String,
-    icon: json['icon'] as String?,
-    color: json['color'] as String,
-    questionsCount: json['questions_count'] as int?,
-  );
+  factory Subject.fromJson(Map<String, dynamic> json) {
+    int? _asNullableInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v);
+      return null;
+    }
+
+    return Subject(
+      id: json['id'] is int
+          ? json['id'] as int
+          : int.tryParse('${json['id']}') ?? 0,
+      name: (json['name'] as String?) ?? 'Unknown Subject',
+      icon: json['icon'] as String?,
+      color: (json['color'] as String?) ?? '#2563EB',
+      questionsCount: _asNullableInt(json['questions_count']),
+    );
+  }
 
   Color get flutterColor {
     try {
@@ -227,47 +342,41 @@ class DashboardModel {
   });
 
   factory DashboardModel.fromJson(Map<String, dynamic> json) {
-    debugPrint("========== DASHBOARD RESPONSE ==========");
-    debugPrint("Full Response: ${jsonEncode(json)}");
-    debugPrint("========================================");
+    final rawRecent = json['recent_quizzes'];
+    final recentList = rawRecent is List
+        ? rawRecent
+              .whereType<Map<String, dynamic>>()
+              .map(RecentQuiz.fromJson)
+              .toList()
+        : <RecentQuiz>[];
 
-    // Debug subjects specifically
-    debugPrint("========== SUBJECTS FROM API ==========");
-    if (json['subjects'] != null) {
-      debugPrint("Subjects type: ${json['subjects'].runtimeType}");
-      debugPrint("Subjects length: ${(json['subjects'] as List).length}");
-      for (var subject in json['subjects']) {
-        debugPrint("Subject data: $subject");
-      }
-    } else {
-      debugPrint("No subjects key found in response");
-      debugPrint("Available keys: ${json.keys}");
-    }
-    debugPrint("========================================");
+    final rawSubjects = json['subjects'];
+    final subjectList = rawSubjects is List
+        ? rawSubjects
+              .whereType<Map<String, dynamic>>()
+              .map(Subject.fromJson)
+              .toList()
+        : <Subject>[];
 
     return DashboardModel(
-      success: json['success'] as bool,
+      success: json['success'] as bool? ?? false,
       user: User.fromJson(json['user'] as Map<String, dynamic>),
-      stats: Stats.fromJson(json['stats'] as Map<String, dynamic>),
-      continueLearning: json['continue_learning'] != null
+      stats: Stats.fromJson(
+        (json['stats'] as Map<String, dynamic>?) ?? <String, dynamic>{},
+      ),
+      continueLearning: json['continue_learning'] is Map<String, dynamic>
           ? ContinueLearning.fromJson(
               json['continue_learning'] as Map<String, dynamic>,
             )
           : null,
-      subjects: json['subjects'] != null
-          ? (json['subjects'] as List<dynamic>)
-                .map((e) => Subject.fromJson(e as Map<String, dynamic>))
-                .toList()
-          : [],
-      recentQuizzes: (json['recent_quizzes'] as List<dynamic>)
-          .map((e) => RecentQuiz.fromJson(e as Map<String, dynamic>))
-          .toList(),
+      subjects: subjectList,
+      recentQuizzes: recentList,
     );
   }
 }
 
 // ============================================================
-// 3. SERVICE  (unchanged — same endpoints, same error handling)
+// 3. SERVICE
 // ============================================================
 
 class DashboardService {
@@ -353,16 +462,14 @@ class DashboardService {
       throw Exception('Received an invalid response from the server.');
     }
 
-    debugPrint('Subjects API Status: ${response.statusCode}');
-    debugPrint('Subjects API Response: ${response.body}');
-
     if (response.statusCode == 200 && data['success'] == true) {
       final subjectsList = data['subjects'];
       if (subjectsList == null || subjectsList is! List) {
         throw Exception('Invalid subjects data received from server.');
       }
       return subjectsList
-          .map((e) => Subject.fromJson(e as Map<String, dynamic>))
+          .whereType<Map<String, dynamic>>()
+          .map(Subject.fromJson)
           .toList();
     }
 
@@ -393,8 +500,6 @@ class _Palette {
   static const Color blue = Color(0xFF2563EB);
   static const Color cyan = Color(0xFF06B6D4);
   static const Color gold = Color(0xFFF59E0B);
-  static const Color orange = Color(0xFFF97316);
-  static const Color teal = Color(0xFF14B8A6);
 
   static const List<Color> ctaGradient = [violet, blue];
   static const List<Color> battleGradient = [violetDeep, violet, blue];
@@ -430,11 +535,6 @@ class _Palette {
 
 // ============================================================
 // 4b. RESPONSIVE HELPERS
-// ------------------------------------------------------------
-// Centralizes every breakpoint decision so the rest of the file
-// stays declarative. Nothing here changes *what* is shown —
-// only how much space, padding, and text scale it gets on
-// phones vs. tablets vs. wider/foldable screens.
 // ============================================================
 
 enum _DeviceType { compactPhone, phone, tablet, desktop }
@@ -453,10 +553,7 @@ class _Responsive {
   }
 
   static bool isTabletUp(BuildContext context) => width(context) >= 600;
-  static bool isCompact(BuildContext context) => width(context) < 340;
 
-  /// Horizontal page padding — grows with the viewport so content
-  /// never feels cramped on a tablet or stretched edge-to-edge.
   static double horizontalPadding(BuildContext context) {
     switch (deviceType(context)) {
       case _DeviceType.desktop:
@@ -469,9 +566,6 @@ class _Responsive {
     }
   }
 
-  /// Caps how wide the main content column can grow on large
-  /// screens, then the caller centers it — this is what keeps
-  /// cards from looking absurdly wide on a tablet/desktop.
   static double maxContentWidth(BuildContext context) {
     switch (deviceType(context)) {
       case _DeviceType.desktop:
@@ -496,8 +590,6 @@ class _Responsive {
     }
   }
 
-  /// Gentle font-size scaling — never more than ~15% either way,
-  /// so type never looks jarring, just comfortably sized per device.
   static double scale(BuildContext context, double base) {
     switch (deviceType(context)) {
       case _DeviceType.desktop:
@@ -631,10 +723,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
           final data = snapshot.data!;
 
-          debugPrint("========== FINAL AVATAR URL ==========");
-          debugPrint("Avatar URL: ${data.user.avatarUrl}");
-          debugPrint("======================================");
-
           final hPad = _Responsive.horizontalPadding(context);
           final maxWidth = _Responsive.maxContentWidth(context);
 
@@ -679,16 +767,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const _SectionTitle('Quick Access'),
-                                  //_ViewAllButton(onTap: _navigateToSubjects),
+                                  _SectionTitle(_quickAccessTitle(data.user)),
                                 ],
                               ),
                               const SizedBox(height: 12),
                               _QuickAccessRow(
-                                stats: data.stats,
-                                onSubjects: _navigateToSubjects,
-                                onHistory: _navigateToHistory,
-                                onProfile: () => _navigateToProfile(data.user),
+                                user: data.user,
                                 onPastPapers: _navigateToPastPapers,
                               ),
                               const SizedBox(height: 26),
@@ -701,7 +785,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 ],
                               ),
                               const SizedBox(height: 14),
-                              // Use FutureBuilder for subjects
                               FutureBuilder<List<Subject>>(
                                 future: _subjectsFuture,
                                 builder: (context, subjectSnapshot) {
@@ -776,17 +859,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                               ),
                               const SizedBox(height: 26),
                               const _SectionTitle('Your Recent Activity'),
-                              const SizedBox(height: 4),
-                              const Text(
-                                'A live cross-student leaderboard needs a '
-                                'ranking endpoint that isn\'t in the API yet — '
-                                'showing your own recent results instead.',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: _Palette.textSecondary,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
                               const SizedBox(height: 12),
                               _PersonalLeaderboardCard(
                                 user: data.user,
@@ -807,6 +879,21 @@ class _DashboardScreenState extends State<DashboardScreen>
         },
       ),
     );
+  }
+
+  /// Title shown above the Quick Access row — reflects the user's category.
+  String _quickAccessTitle(User user) {
+    switch (user.pastPaperCategory) {
+      case 'grade5':
+        return 'Grade 5 Past Papers';
+      case 'ol':
+        return 'O/L Past Papers';
+      case 'al':
+        return 'A/L Past Papers';
+      case 'government':
+      default:
+        return 'Government Exam Papers';
+    }
   }
 }
 
@@ -1048,9 +1135,11 @@ class _HeroHeader extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 4),
-                        const Text(
-                          'Keep learning, keep winning!',
-                          style: TextStyle(
+                        Text(
+                          user.subtitleLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
                             color: _Palette.textOnPhotoMuted,
                             fontSize: 12.5,
                           ),
@@ -1218,12 +1307,6 @@ class _AvatarButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    debugPrint("========== AVATAR BUTTON ==========");
-    debugPrint("Avatar URL: ${user.avatarUrl}");
-    debugPrint("Avatar URL isEmpty: ${user.avatarUrl?.isEmpty ?? true}");
-    debugPrint("User Name: ${user.name}");
-    debugPrint("===================================");
-
     final radius = _Responsive.avatarRadius(context, 19);
 
     return GestureDetector(
@@ -1619,7 +1702,8 @@ class _SummaryStat extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Quick Access — now redirects to Past Papers screens.
+// Quick Access — ALWAYS renders exactly ONE tile based on
+// User.pastPaperCategory (which never returns null).
 // ------------------------------------------------------------
 typedef _QuickAccessItem = ({
   IconData icon,
@@ -1630,25 +1714,16 @@ typedef _QuickAccessItem = ({
 });
 
 class _QuickAccessRow extends StatelessWidget {
-  final Stats stats;
-  final VoidCallback onSubjects;
-  final VoidCallback onHistory;
-  final VoidCallback onProfile;
+  final User user;
   final void Function({required String category, required String title})
   onPastPapers;
 
-  const _QuickAccessRow({
-    required this.stats,
-    required this.onSubjects,
-    required this.onHistory,
-    required this.onProfile,
-    required this.onPastPapers,
-  });
+  const _QuickAccessRow({required this.user, required this.onPastPapers});
 
   @override
   Widget build(BuildContext context) {
-    final List<_QuickAccessItem> items = [
-      (
+    final Map<String, _QuickAccessItem> catalogue = {
+      'grade5': (
         icon: Icons.grade_rounded,
         label: 'Grade 5',
         sub: 'Past Papers',
@@ -1656,21 +1731,21 @@ class _QuickAccessRow extends StatelessWidget {
         onTap: () =>
             onPastPapers(category: 'primary', title: 'Grade 5 Past Papers'),
       ),
-      (
+      'ol': (
         icon: Icons.quiz_rounded,
         label: 'O/L',
         sub: 'Past Papers',
         colors: const [Color(0xFF2563EB), Color(0xFF1D4ED8)],
         onTap: () => onPastPapers(category: 'ol', title: 'O/L Past Papers'),
       ),
-      (
+      'al': (
         icon: Icons.school_rounded,
         label: 'A/L',
         sub: 'Past Papers',
         colors: const [Color(0xFFF59E0B), Color(0xFFEA580C)],
         onTap: () => onPastPapers(category: 'al', title: 'A/L Past Papers'),
       ),
-      (
+      'government': (
         icon: Icons.assignment_rounded,
         label: 'GOV',
         sub: 'Past Papers',
@@ -1680,41 +1755,13 @@ class _QuickAccessRow extends StatelessWidget {
           title: 'Government Exam Past Papers',
         ),
       ),
-    ];
+    };
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 340;
+    // pastPaperCategory is guaranteed non-null now.
+    final category = user.pastPaperCategory;
+    final item = catalogue[category] ?? catalogue['government']!;
 
-        if (compact) {
-          final tileWidth = (constraints.maxWidth - 10) / 2;
-          return Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: items
-                .map(
-                  (item) => SizedBox(
-                    width: tileWidth,
-                    child: _QuickAccessTile(item: item),
-                  ),
-                )
-                .toList(),
-          );
-        }
-
-        return Row(
-          children: List.generate(items.length, (i) {
-            final isLast = i == items.length - 1;
-            return Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(right: isLast ? 0 : 10),
-                child: _QuickAccessTile(item: items[i]),
-              ),
-            );
-          }),
-        );
-      },
-    );
+    return _QuickAccessTile(item: item);
   }
 }
 
@@ -1790,9 +1837,7 @@ class _QuickAccessTile extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Subjects row — same "first 4 subjects" behaviour as before,
-// same empty-state, just laid out responsively (Row on normal
-// widths, 2x2 wrap on very narrow phones).
+// Subjects row
 // ------------------------------------------------------------
 class _SubjectsRow extends StatelessWidget {
   final List<Subject> subjects;
@@ -1802,17 +1847,6 @@ class _SubjectsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Debug: Print subjects count and data
-    debugPrint("========== SUBJECTS ROW ==========");
-    debugPrint("Subjects count: ${subjects.length}");
-    for (var subject in subjects) {
-      debugPrint(
-        "Subject: ${subject.name}, ID: ${subject.id}, Color: ${subject.color}",
-      );
-    }
-    debugPrint("====================================");
-
-    // Check if subjects list is empty
     if (subjects.isEmpty) {
       return Container(
         width: double.infinity,
@@ -1845,7 +1879,6 @@ class _SubjectsRow extends StatelessWidget {
       );
     }
 
-    // Take only first 4 subjects (unchanged)
     final displayed = subjects.take(4).toList();
 
     return LayoutBuilder(
@@ -1890,6 +1923,30 @@ class _SubjectTile extends StatelessWidget {
 
   const _SubjectTile({required this.subject, required this.onTap});
 
+  IconData _iconForSubject() {
+    final name = subject.name.toLowerCase();
+    if (name.contains('math')) return Icons.calculate_outlined;
+    if (name.contains('science')) return Icons.science_outlined;
+    if (name.contains('english')) return Icons.menu_book_outlined;
+    if (name.contains('sinhala')) return Icons.translate_rounded;
+    if (name.contains('tamil')) return Icons.translate_rounded;
+    if (name.contains('ict') || name.contains('comput')) {
+      return Icons.computer_outlined;
+    }
+    if (name.contains('history')) return Icons.account_balance_outlined;
+    if (name.contains('commerce')) return Icons.bar_chart_rounded;
+    if (name.contains('bio')) return Icons.eco_outlined;
+    if (name.contains('physic')) return Icons.bolt_outlined;
+    if (name.contains('chem')) return Icons.science_rounded;
+    if (name.contains('geo')) return Icons.public_outlined;
+    if (name.contains('art')) return Icons.palette_outlined;
+    if (name.contains('qa') || name.contains('aptitude')) {
+      return Icons.psychology_outlined;
+    }
+    if (name.contains('language')) return Icons.translate_rounded;
+    return Icons.school_outlined;
+  }
+
   @override
   Widget build(BuildContext context) {
     final color = subject.flutterColor;
@@ -1913,7 +1970,7 @@ class _SubjectTile extends StatelessWidget {
                 color: color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(Icons.school_rounded, color: color, size: 22),
+              child: Icon(_iconForSubject(), color: color, size: 22),
             ),
             const SizedBox(height: 10),
             Text(
@@ -2191,6 +2248,14 @@ class _PersonalLeaderboardCard extends StatelessWidget {
     final rows = recentQuizzes.take(5).toList();
     final isTabletUp = _Responsive.isTabletUp(context);
 
+    final subtitle = (user.school != null && user.school!.isNotEmpty)
+        ? user.school!
+        : (user.grade?.name ??
+              (user.district ??
+                  (user.isGovernmentExamCandidate || user.grade == null
+                      ? 'Government Exam Candidate'
+                      : 'QuizLanka AI learner')));
+
     return Container(
       decoration: _Palette.card(radius: 22),
       padding: EdgeInsets.all(isTabletUp ? 20 : 16),
@@ -2230,7 +2295,7 @@ class _PersonalLeaderboardCard extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      user.school,
+                      subtitle,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 11,

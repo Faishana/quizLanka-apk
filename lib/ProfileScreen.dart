@@ -13,17 +13,96 @@ import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/Login.dart';
 
 // ============================================================
-// 2. MODELS — UPDATED WITH BACKEND FIELDS
+// 2. MODELS
 // ============================================================
 
+/// Education category (scholarship / ol / al / gov).
+class CategoryModel {
+  final String value; // 'scholarship' | 'ol' | 'al' | 'gov'
+  final String text; // Display label
+  final String icon; // Material icon key — mapped in UI
+
+  CategoryModel({
+    required this.value,
+    required this.text,
+    this.icon = 'school',
+  });
+
+  factory CategoryModel.fromJson(Map<String, dynamic> json) {
+    return CategoryModel(
+      value: (json['value'] ?? json['category'] ?? '').toString(),
+      text: (json['text'] ?? json['name'] ?? '').toString(),
+      icon: (json['icon'] ?? 'school').toString(),
+    );
+  }
+
+  /// Fallback list — used when the backend categories endpoint fails.
+  static List<CategoryModel> fallbackList() => [
+    CategoryModel(
+      value: 'scholarship',
+      text: 'Grade 5 Scholarship',
+      icon: 'emoji_events',
+    ),
+    CategoryModel(value: 'ol', text: 'Ordinary Level (O/L)', icon: 'menu_book'),
+    CategoryModel(value: 'al', text: 'Advanced Level (A/L)', icon: 'science'),
+    CategoryModel(
+      value: 'gov',
+      text: 'Government Exams',
+      icon: 'account_balance',
+    ),
+  ];
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CategoryModel &&
+          runtimeType == other.runtimeType &&
+          value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+}
+
+/// Grade — now carries its `category` and optional `al_streams` (for A/L).
 class GradeModel {
   final int id;
   final String name;
+  final String category; // 'scholarship' | 'ol' | 'al' | 'gov'
+  final List<String> alStreams; // Only for 'al' grades
 
-  GradeModel({required this.id, required this.name});
+  GradeModel({
+    required this.id,
+    required this.name,
+    required this.category,
+    this.alStreams = const [],
+  });
+
+  bool get isAdvancedLevel => category == 'al';
 
   factory GradeModel.fromJson(Map<String, dynamic> json) {
-    return GradeModel(id: json['id'], name: json['name']);
+    final rawId = json['id'];
+    final int id;
+    if (rawId is int) {
+      id = rawId;
+    } else if (rawId is num) {
+      id = rawId.toInt();
+    } else if (rawId is String) {
+      id = int.tryParse(rawId) ?? 0;
+    } else {
+      id = 0;
+    }
+
+    final streamsRaw = json['al_streams'];
+    final List<String> streams = streamsRaw is List
+        ? streamsRaw.map((e) => e.toString()).toList()
+        : <String>[];
+
+    return GradeModel(
+      id: id,
+      name: json['name'] is String ? json['name'] as String : 'Unassigned',
+      category: (json['category'] ?? json['grade_category'] ?? '').toString(),
+      alStreams: streams,
+    );
   }
 
   @override
@@ -35,45 +114,110 @@ class GradeModel {
   int get hashCode => id.hashCode;
 }
 
-// Updated ProfileModel with targetExam
+/// A/L stream option for UI dropdowns.
+class AlStreamOption {
+  final String value; // 'bio' | 'maths' | 'technology' | 'arts' | 'commerce'
+  final String text;
+
+  AlStreamOption({required this.value, required this.text});
+
+  static final List<AlStreamOption> all = [
+    AlStreamOption(value: 'bio', text: 'Biological Science'),
+    AlStreamOption(value: 'maths', text: 'Physical Science / Maths'),
+    AlStreamOption(value: 'technology', text: 'Technology'),
+    AlStreamOption(value: 'arts', text: 'Arts'),
+    AlStreamOption(value: 'commerce', text: 'Commerce'),
+  ];
+
+  static String labelFor(String? value) {
+    if (value == null) return '';
+    final match = all.where((s) => s.value == value).toList();
+    return match.isEmpty ? value : match.first.text;
+  }
+}
+
 class ProfileModel {
   final int id;
   final String name;
   final String email;
-  final String school;
-  final String district;
-  final String preferredMedium;
+  final String? school;
+  final String? district;
+  final String? preferredMedium;
   final String? targetExam;
-  final GradeModel grade;
+  final GradeModel? grade;
   final String? avatarUrl;
+  final String? userCategory;
+
+  // NEW fields
+  final String? gradeCategory; // 'scholarship' | 'ol' | 'al' | 'gov'
+  final String? alStream; // only for A/L
 
   ProfileModel({
     required this.id,
     required this.name,
     required this.email,
-    required this.school,
-    required this.district,
-    required this.preferredMedium,
-    required this.grade,
+    this.school,
+    this.district,
+    this.preferredMedium,
     this.targetExam,
+    this.grade,
     this.avatarUrl,
+    this.userCategory,
+    this.gradeCategory,
+    this.alStream,
   });
 
   factory ProfileModel.fromJson(Map<String, dynamic> json) {
+    GradeModel? parsedGrade;
+    final rawGrade = json['grade'];
+    if (rawGrade is Map<String, dynamic> &&
+        rawGrade['id'] != null &&
+        rawGrade['name'] is String) {
+      parsedGrade = GradeModel.fromJson(rawGrade);
+    }
+
+    // Category: prefer explicit field, fall back to grade.category
+    final catFromJson = json['grade_category'];
+    final category = (catFromJson is String && catFromJson.isNotEmpty)
+        ? catFromJson
+        : parsedGrade?.category;
+
     return ProfileModel(
-      id: json['id'] as int,
-      name: json['name'] as String? ?? '',
-      email: json['email'] as String? ?? '',
-      school: json['school'] as String? ?? '',
-      district: json['district'] as String? ?? '',
-      preferredMedium: json['preferred_medium'] as String? ?? 'English',
-      targetExam: json['target_exam'] as String?,
-      grade: GradeModel.fromJson(
-        (json['grade'] as Map<String, dynamic>?) ?? {},
-      ),
-      avatarUrl: json['profile_image'] as String?,
+      id: json['id'] is int
+          ? json['id'] as int
+          : int.tryParse('${json['id']}') ?? 0,
+      name: (json['name'] as String?) ?? '',
+      email: (json['email'] as String?) ?? '',
+      school: json['school'] is String ? json['school'] as String : null,
+      district: json['district'] is String ? json['district'] as String : null,
+      preferredMedium: json['preferred_medium'] is String
+          ? json['preferred_medium'] as String
+          : null,
+      targetExam: json['target_exam'] is String
+          ? json['target_exam'] as String
+          : null,
+      grade: parsedGrade,
+      avatarUrl: json['profile_image'] is String
+          ? json['profile_image'] as String
+          : (json['avatar_url'] is String
+                ? json['avatar_url'] as String
+                : null),
+      userCategory: json['user_category'] is String
+          ? json['user_category'] as String
+          : null,
+      gradeCategory: category,
+      alStream: json['al_stream'] is String
+          ? json['al_stream'] as String
+          : null,
     );
   }
+
+  bool get isStudent => (userCategory ?? '').trim().toLowerCase() == 'student';
+
+  bool get isGovernmentExamCandidate =>
+      (userCategory ?? '').trim().toLowerCase() == 'government exam candidate';
+
+  bool get isAdvancedLevel => gradeCategory == 'al';
 
   ProfileModel copyWith({
     String? name,
@@ -83,6 +227,8 @@ class ProfileModel {
     GradeModel? grade,
     String? targetExam,
     String? avatarUrl,
+    String? gradeCategory,
+    String? alStream,
   }) {
     return ProfileModel(
       id: id,
@@ -94,11 +240,18 @@ class ProfileModel {
       targetExam: targetExam ?? this.targetExam,
       grade: grade ?? this.grade,
       avatarUrl: avatarUrl ?? this.avatarUrl,
+      userCategory: userCategory,
+      gradeCategory: gradeCategory ?? this.gradeCategory,
+      alStream: alStream ?? this.alStream,
     );
   }
 }
 
-// NEW: Statistics Model
+// ============================================================
+// Statistics / Ranking / Achievement / Progress models
+// (unchanged — already null-safe)
+// ============================================================
+
 class ProfileStatistics {
   final int level;
   final int xp;
@@ -121,20 +274,33 @@ class ProfileStatistics {
   });
 
   factory ProfileStatistics.fromJson(Map<String, dynamic> json) {
+    int _asInt(dynamic v, {int fallback = 0}) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? fallback;
+      return fallback;
+    }
+
+    double _asDouble(dynamic v, {double fallback = 0}) {
+      if (v is double) return v.isFinite ? v : fallback;
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v) ?? fallback;
+      return fallback;
+    }
+
     return ProfileStatistics(
-      level: json['level'] ?? 1,
-      xp: json['xp'] ?? 0,
-      requiredXp: json['required_xp'] ?? 1000,
-      completedQuizzes: json['completed_quizzes'] ?? 0,
-      averageAccuracy: (json['average_accuracy'] ?? 0).toDouble(),
-      timeSpentMinutes: json['time_spent_minutes'] ?? 0,
-      currentStreak: json['current_streak'] ?? 0,
-      longestStreak: json['longest_streak'] ?? 0,
+      level: _asInt(json['level'], fallback: 1),
+      xp: _asInt(json['xp']),
+      requiredXp: _asInt(json['required_xp'], fallback: 1000),
+      completedQuizzes: _asInt(json['completed_quizzes']),
+      averageAccuracy: _asDouble(json['average_accuracy']),
+      timeSpentMinutes: _asInt(json['time_spent_minutes']),
+      currentStreak: _asInt(json['current_streak']),
+      longestStreak: _asInt(json['longest_streak']),
     );
   }
 }
 
-// NEW: Ranking Model
 class ProfileRanking {
   final int nationalRank;
   final int schoolRank;
@@ -142,14 +308,20 @@ class ProfileRanking {
   ProfileRanking({required this.nationalRank, required this.schoolRank});
 
   factory ProfileRanking.fromJson(Map<String, dynamic> json) {
+    int _asInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? 0;
+      return 0;
+    }
+
     return ProfileRanking(
-      nationalRank: json['national_rank'] ?? 0,
-      schoolRank: json['school_rank'] ?? 0,
+      nationalRank: _asInt(json['national_rank']),
+      schoolRank: _asInt(json['school_rank']),
     );
   }
 }
 
-// NEW: Achievement Model
 class AchievementModel {
   final int id;
   final String name;
@@ -167,16 +339,15 @@ class AchievementModel {
 
   factory AchievementModel.fromJson(Map<String, dynamic> json) {
     return AchievementModel(
-      id: json['id'] ?? 0,
-      name: json['name'] ?? '',
-      description: json['description'] ?? '',
-      icon: json['icon'],
-      color: json['color'],
+      id: json['id'] is int ? json['id'] as int : 0,
+      name: (json['name'] as String?) ?? '',
+      description: (json['description'] as String?) ?? '',
+      icon: json['icon'] as String?,
+      color: json['color'] as String?,
     );
   }
 }
 
-// NEW: Subject Progress Model
 class SubjectProgressModel {
   final int id;
   final String name;
@@ -195,18 +366,31 @@ class SubjectProgressModel {
   });
 
   factory SubjectProgressModel.fromJson(Map<String, dynamic> json) {
+    int _asInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? 0;
+      return 0;
+    }
+
+    double _asDouble(dynamic v) {
+      if (v is double) return v.isFinite ? v : 0;
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v) ?? 0;
+      return 0;
+    }
+
     return SubjectProgressModel(
-      id: json['id'] ?? 0,
-      name: json['name'] ?? '',
-      accuracy: (json['accuracy'] ?? 0).toDouble(),
-      quizzesCompleted: json['quizzes_completed'] ?? 0,
-      xp: json['xp'] ?? 0,
-      rank: json['rank'] ?? 0,
+      id: _asInt(json['id']),
+      name: (json['name'] as String?) ?? '',
+      accuracy: _asDouble(json['accuracy']),
+      quizzesCompleted: _asInt(json['quizzes_completed']),
+      xp: _asInt(json['xp']),
+      rank: _asInt(json['rank']),
     );
   }
 }
 
-// NEW: Weekly Progress Model
 class WeeklyProgressModel {
   final String day;
   final double value;
@@ -214,14 +398,20 @@ class WeeklyProgressModel {
   WeeklyProgressModel({required this.day, required this.value});
 
   factory WeeklyProgressModel.fromJson(Map<String, dynamic> json) {
+    double _asDouble(dynamic v) {
+      if (v is double) return v.isFinite ? v : 0;
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v) ?? 0;
+      return 0;
+    }
+
     return WeeklyProgressModel(
-      day: json['day'] ?? '',
-      value: (json['value'] ?? 0).toDouble(),
+      day: (json['day'] as String?) ?? '',
+      value: _asDouble(json['value']),
     );
   }
 }
 
-// NEW: Strongest Subject Model
 class StrongestSubjectModel {
   final String name;
   final double accuracy;
@@ -229,25 +419,37 @@ class StrongestSubjectModel {
   StrongestSubjectModel({required this.name, required this.accuracy});
 
   factory StrongestSubjectModel.fromJson(Map<String, dynamic> json) {
+    double _asDouble(dynamic v) {
+      if (v is double) return v.isFinite ? v : 0;
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v) ?? 0;
+      return 0;
+    }
+
     return StrongestSubjectModel(
-      name: json['name'] ?? '',
-      accuracy: (json['accuracy'] ?? 0).toDouble(),
+      name: (json['name'] as String?) ?? '',
+      accuracy: _asDouble(json['accuracy']),
     );
   }
 }
 
-// NEW: AI Improvement Model
 class AiImprovementModel {
   final double percentage;
 
   AiImprovementModel({required this.percentage});
 
   factory AiImprovementModel.fromJson(Map<String, dynamic> json) {
-    return AiImprovementModel(percentage: (json['percentage'] ?? 0).toDouble());
+    double _asDouble(dynamic v) {
+      if (v is double) return v.isFinite ? v : 0;
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v) ?? 0;
+      return 0;
+    }
+
+    return AiImprovementModel(percentage: _asDouble(json['percentage']));
   }
 }
 
-// NEW: Full Profile Response
 class FullProfileResponse {
   final ProfileModel user;
   final ProfileStatistics statistics;
@@ -271,7 +473,9 @@ class FullProfileResponse {
 
   factory FullProfileResponse.fromJson(Map<String, dynamic> json) {
     return FullProfileResponse(
-      user: ProfileModel.fromJson(json['user'] as Map<String, dynamic>),
+      user: ProfileModel.fromJson(
+        (json['user'] as Map<String, dynamic>?) ?? <String, dynamic>{},
+      ),
       statistics: ProfileStatistics.fromJson(
         (json['statistics'] as Map<String, dynamic>?) ?? {},
       ),
@@ -279,20 +483,23 @@ class FullProfileResponse {
         (json['ranking'] as Map<String, dynamic>?) ?? {},
       ),
       achievements: ((json['achievements'] as List?) ?? [])
-          .map((e) => AchievementModel.fromJson(e as Map<String, dynamic>))
+          .whereType<Map<String, dynamic>>()
+          .map(AchievementModel.fromJson)
           .toList(),
       subjects: ((json['subjects'] as List?) ?? [])
-          .map((e) => SubjectProgressModel.fromJson(e as Map<String, dynamic>))
+          .whereType<Map<String, dynamic>>()
+          .map(SubjectProgressModel.fromJson)
           .toList(),
       weeklyProgress: ((json['weekly_progress'] as List?) ?? [])
-          .map((e) => WeeklyProgressModel.fromJson(e as Map<String, dynamic>))
+          .whereType<Map<String, dynamic>>()
+          .map(WeeklyProgressModel.fromJson)
           .toList(),
-      strongestSubject: json['strongest_subject'] != null
+      strongestSubject: json['strongest_subject'] is Map<String, dynamic>
           ? StrongestSubjectModel.fromJson(
               json['strongest_subject'] as Map<String, dynamic>,
             )
           : null,
-      aiImprovement: json['ai_improvement'] != null
+      aiImprovement: json['ai_improvement'] is Map<String, dynamic>
           ? AiImprovementModel.fromJson(
               json['ai_improvement'] as Map<String, dynamic>,
             )
@@ -302,7 +509,7 @@ class FullProfileResponse {
 }
 
 // ============================================================
-// 3. PROFILE SERVICE — UPDATED
+// 3. PROFILE SERVICE
 // ============================================================
 
 class ProfileService {
@@ -338,10 +545,8 @@ class ProfileService {
 
   static const List<String> mediums = ['Sinhala', 'English', 'Tamil'];
 
-  // UPDATED: Returns FullProfileResponse instead of ProfileModel
   Future<FullProfileResponse> getProfile() async {
     final token = await TokenStorage.getToken();
-
     if (token == null || token.isEmpty) {
       throw Exception('Authentication token not found.');
     }
@@ -356,19 +561,15 @@ class ProfileService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
-
         if (data['success'] == true) {
           return FullProfileResponse.fromJson(data);
         }
-
         throw Exception(data['message'] ?? 'Failed to load profile');
       }
-
       if (response.statusCode == 401) {
         await TokenStorage.clearAll();
         throw Exception('Session expired. Please login again.');
       }
-
       throw Exception('Failed to load profile: ${response.statusCode}');
     } on TimeoutException {
       throw Exception('The request timed out. Please try again.');
@@ -379,7 +580,8 @@ class ProfileService {
     }
   }
 
-  Future<List<GradeModel>> getGrades() async {
+  /// Fetch grade categories.
+  Future<List<CategoryModel>> getCategories() async {
     final token = await TokenStorage.getToken();
     if (token == null || token.isEmpty) {
       throw Exception('Authentication token not found.');
@@ -387,7 +589,7 @@ class ProfileService {
     try {
       final response = await _client
           .get(
-            Uri.parse('${ApiConfig.baseUrl}/public/grades'),
+            Uri.parse('${ApiConfig.baseUrl}/public/grade-categories'),
             headers: ApiConfig.getHeaders(token),
           )
           .timeout(const Duration(seconds: 15));
@@ -395,16 +597,51 @@ class ProfileService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         if (data['success'] == true) {
-          final gradesList = data['data'] as List<dynamic>;
-          return gradesList
-              .map((e) => GradeModel.fromJson(e as Map<String, dynamic>))
+          final list = data['data'] as List<dynamic>?;
+          if (list == null || list.isEmpty) return CategoryModel.fallbackList();
+          return list
+              .whereType<Map<String, dynamic>>()
+              .map(CategoryModel.fromJson)
               .toList();
-        } else {
-          throw Exception(data['message'] ?? 'Failed to load grades');
         }
-      } else {
-        throw Exception('Failed to load grades: ${response.statusCode}');
       }
+      return CategoryModel.fallbackList();
+    } catch (e) {
+      debugPrint('getCategories failed, using fallback: $e');
+      return CategoryModel.fallbackList();
+    }
+  }
+
+  /// Fetch grades, optionally filtered by category.
+  Future<List<GradeModel>> getGrades({String? category}) async {
+    final token = await TokenStorage.getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Authentication token not found.');
+    }
+    try {
+      final uri = Uri.parse('${ApiConfig.baseUrl}/public/grades').replace(
+        queryParameters: category != null && category.isNotEmpty
+            ? {'category': category}
+            : null,
+      );
+
+      final response = await _client
+          .get(uri, headers: ApiConfig.getHeaders(token))
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['success'] == true) {
+          final gradesList = data['data'] as List<dynamic>?;
+          if (gradesList == null) return <GradeModel>[];
+          return gradesList
+              .whereType<Map<String, dynamic>>()
+              .map(GradeModel.fromJson)
+              .toList();
+        }
+        throw Exception(data['message'] ?? 'Failed to load grades');
+      }
+      throw Exception('Failed to load grades: ${response.statusCode}');
     } on TimeoutException {
       throw Exception('The request timed out. Please try again.');
     } on SocketException {
@@ -414,12 +651,16 @@ class ProfileService {
     }
   }
 
+  /// Update profile with grade_id + optional al_stream.
   Future<ProfileModel> updateProfile({
     required String name,
-    required int gradeId,
-    required String school,
-    required String district,
-    required String preferredMedium,
+    int? gradeId,
+    String? alStream,
+    String? school,
+    String? district,
+    String? preferredMedium,
+    String? targetExam,
+    String? gradeCategory,
   }) async {
     final token = await TokenStorage.getToken();
     if (token == null || token.isEmpty) {
@@ -428,10 +669,16 @@ class ProfileService {
 
     final body = jsonEncode({
       'name': name,
-      'grade_id': gradeId,
-      'school': school,
-      'district': district,
-      'preferred_medium': preferredMedium,
+      if (gradeId != null) 'grade_id': gradeId,
+      if (gradeCategory != null) 'grade_category': gradeCategory,
+      if (alStream != null && alStream.isNotEmpty) 'al_stream': alStream,
+      if (school != null && school.trim().isNotEmpty) 'school': school.trim(),
+      if (district != null && district.trim().isNotEmpty)
+        'district': district.trim(),
+      if (preferredMedium != null && preferredMedium.trim().isNotEmpty)
+        'preferred_medium': preferredMedium.trim(),
+      if (targetExam != null && targetExam.trim().isNotEmpty)
+        'target_exam': targetExam.trim(),
     });
 
     try {
@@ -449,10 +696,11 @@ class ProfileService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         if (data['success'] == true) {
-          return ProfileModel.fromJson(data['user'] as Map<String, dynamic>);
-        } else {
-          throw Exception(data['message'] ?? 'Failed to update profile');
+          return ProfileModel.fromJson(
+            data['user'] as Map<String, dynamic>? ?? <String, dynamic>{},
+          );
         }
+        throw Exception(data['message'] ?? 'Failed to update profile');
       } else if (response.statusCode == 401) {
         await TokenStorage.clearAll();
         throw Exception('Session expired. Please login again.');
@@ -460,16 +708,16 @@ class ProfileService {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final errors = data['errors'] as Map<String, dynamic>?;
         if (errors != null) {
-          final errorMessages = errors.values
-              .expand((e) => e as List<dynamic>)
+          final msgs = errors.values
+              .whereType<List<dynamic>>()
+              .expand((e) => e)
               .map((e) => e.toString())
               .join('\n');
-          throw Exception(errorMessages);
+          throw Exception(msgs);
         }
         throw Exception('Validation error');
-      } else {
-        throw Exception('Failed to update profile: ${response.statusCode}');
       }
+      throw Exception('Failed to update profile: ${response.statusCode}');
     } on TimeoutException {
       throw Exception('The request timed out. Please try again.');
     } on SocketException {
@@ -479,10 +727,8 @@ class ProfileService {
     }
   }
 
-  // Upload profile photo with Horizon queue support
   Future<void> uploadProfilePhoto(File image) async {
     final token = await TokenStorage.getToken();
-
     if (token == null || token.isEmpty) {
       throw Exception('Authentication token not found.');
     }
@@ -491,12 +737,10 @@ class ProfileService {
       'POST',
       Uri.parse('${ApiConfig.baseUrl}${ApiConfig.profilePhoto}'),
     );
-
     request.headers.addAll({
       'Accept': 'application/json',
       'Authorization': 'Bearer $token',
     });
-
     request.files.add(await http.MultipartFile.fromPath('photo', image.path));
 
     final response = await request.send();
@@ -516,25 +760,21 @@ class ProfileService {
 }
 
 // ============================================================
-// 4. PALETTE — Dark "Aurora Neon" tokens
+// 4. PALETTE
 // ============================================================
 class _Palette {
-  // Background — soft lavender-white
   static const bgTop = Color(0xFFF8F7FC);
   static const bgMid = Color(0xFFF2F0FA);
   static const bgBottom = Color(0xFFECE9F8);
 
-  // Glass surfaces
   static const cardGlass = Color(0xFFFFFFFF);
   static const cardGlassLight = Color(0xFFF3F1FB);
   static const cardBorder = Color(0xFFE7E4F6);
 
-  // Text
   static const textPrimary = Color(0xFF1E1B3A);
   static const textSecondary = Color(0xFF6B6890);
   static const textMuted = Color(0xFF9490B8);
 
-  // Accent colors
   static const neonCyan = Color(0xFF15AEDB);
   static const neonBlue = Color(0xFF4E6BFF);
   static const neonViolet = Color(0xFF7C5CFF);
@@ -547,12 +787,11 @@ class _Palette {
 }
 
 // ============================================================
-// 5. PROFILE SCREEN — UPDATED
+// 5. PROFILE SCREEN
 // ============================================================
 
 class ProfileScreen extends StatefulWidget {
   final Key? key;
-
   const ProfileScreen({this.key}) : super(key: key);
 
   @override
@@ -568,21 +807,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _uploadingAvatar = false;
   String? _error;
 
-  // UPDATED: Store both profile and full response
   ProfileModel? _profile;
   FullProfileResponse? _fullProfile;
-  List<GradeModel> _grades = [];
+
+  List<CategoryModel> _categories = [];
+  List<GradeModel> _allGrades = []; // full cache
+  List<GradeModel> _filteredGrades = []; // by category
 
   late TextEditingController _nameController;
   late TextEditingController _schoolController;
 
+  // Edit state
+  CategoryModel? _selectedCategory;
   GradeModel? _selectedGrade;
+  String? _selectedStream;
   String? _selectedDistrict;
   String? _selectedMedium;
 
   Timer? _pollTimer;
   int _pollAttempts = 0;
   static const int _maxPollAttempts = 30;
+
+  bool get _isGovCandidate => _profile?.isGovernmentExamCandidate ?? false;
 
   @override
   void initState() {
@@ -601,7 +847,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.dispose();
   }
 
-  // UPDATED: Load FullProfileResponse
   Future<void> _loadProfile() async {
     setState(() {
       _isLoading = true;
@@ -609,44 +854,64 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
 
     try {
-      final results = await Future.wait([
-        _service.getProfile(),
-        _service.getGrades(),
-      ]);
-
-      final fullProfile = results[0] as FullProfileResponse;
+      final fullProfile = await _service.getProfile();
       final profile = fullProfile.user;
-      final grades = results[1] as List<GradeModel>;
+
+      // Load categories + grades (best-effort)
+      List<CategoryModel> cats = CategoryModel.fallbackList();
+      List<GradeModel> grades = <GradeModel>[];
+      try {
+        cats = await _service.getCategories();
+      } catch (e) {
+        debugPrint('Categories load failed (using fallback): $e');
+      }
+      try {
+        grades = await _service.getGrades();
+      } catch (e) {
+        debugPrint('Grades load failed (non-fatal): $e');
+      }
 
       setState(() {
         _fullProfile = fullProfile;
         _profile = profile;
-        _grades = grades;
+        _categories = cats;
+        _allGrades = grades;
+
         _nameController.text = profile.name;
-        _schoolController.text = profile.school;
+        _schoolController.text = profile.school ?? '';
 
-        if (grades.isNotEmpty) {
-          try {
-            _selectedGrade = grades.firstWhere(
-              (g) => g.id == profile.grade.id,
-              orElse: () => grades.first,
-            );
-          } catch (e) {
-            _selectedGrade = grades.first;
-          }
+        // Resolve category from profile
+        final catValue = profile.gradeCategory ?? profile.grade?.category;
+        _selectedCategory = catValue != null
+            ? cats.firstWhere(
+                (c) => c.value == catValue,
+                orElse: () => cats.first,
+              )
+            : null;
+
+        // Filter grades by category
+        _filteredGrades = _selectedCategory != null
+            ? grades
+                  .where((g) => g.category == _selectedCategory!.value)
+                  .toList()
+            : grades;
+
+        // Resolve grade
+        if (profile.grade != null) {
+          _selectedGrade = _filteredGrades.firstWhere(
+            (g) => g.id == profile.grade!.id,
+            orElse: () => profile.grade!,
+          );
         } else {
-          _selectedGrade = profile.grade;
+          _selectedGrade = null;
         }
 
-        if (ProfileService.districts.contains(profile.district)) {
-          _selectedDistrict = profile.district;
-        } else {
-          _selectedDistrict = ProfileService.districts.isNotEmpty
-              ? ProfileService.districts.first
-              : null;
-        }
+        // Resolve stream
+        _selectedStream = profile.alStream;
 
+        _selectedDistrict = profile.district;
         _selectedMedium = profile.preferredMedium;
+
         _isLoading = false;
       });
     } catch (e) {
@@ -661,12 +926,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final source = await _showImageSourcePicker();
       if (source == null) return;
-
       final XFile? image = await _picker.pickImage(
         source: source,
         imageQuality: 90,
       );
-
       if (image == null) return;
 
       setState(() => _uploadingAvatar = true);
@@ -675,13 +938,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _showGeneratingDialog();
       _pollProfileEvery2Seconds();
     } catch (e) {
-      if (mounted) {
-        _showSnackBar(e.toString(), isError: true);
-      }
+      if (mounted) _showSnackBar(e.toString(), isError: true);
     } finally {
-      if (mounted) {
-        setState(() => _uploadingAvatar = false);
-      }
+      if (mounted) setState(() => _uploadingAvatar = false);
     }
   }
 
@@ -753,13 +1012,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(
-              color: _Palette.neonCyan,
-              strokeWidth: 3,
-            ),
-            const SizedBox(height: 16),
-            const Text(
+          children: const [
+            CircularProgressIndicator(color: _Palette.neonCyan, strokeWidth: 3),
+            SizedBox(height: 16),
+            Text(
               'Generating Avatar...',
               style: TextStyle(
                 color: _Palette.textPrimary,
@@ -767,8 +1023,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 8),
-            const Text(
+            SizedBox(height: 8),
+            Text(
               'Your profile picture is being processed.',
               style: TextStyle(color: _Palette.textSecondary, fontSize: 14),
               textAlign: TextAlign.center,
@@ -779,47 +1035,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // UPDATED: Poll with FullProfileResponse
   void _pollProfileEvery2Seconds() {
     _pollAttempts = 0;
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
       _pollAttempts++;
-
       if (_pollAttempts > _maxPollAttempts) {
         timer.cancel();
         if (mounted) {
           Navigator.pop(context);
           _showSnackBar(
             'Avatar generation is taking longer than expected. Please refresh later.',
-            isError: false,
           );
         }
         return;
       }
-
       try {
-        final updatedResponse = await _service.getProfile();
-        final updatedProfile = updatedResponse.user;
-
-        if (updatedProfile.avatarUrl != null &&
-            updatedProfile.avatarUrl!.isNotEmpty &&
-            updatedProfile.avatarUrl != _profile?.avatarUrl) {
+        final updated = await _service.getProfile();
+        if (updated.user.avatarUrl != null &&
+            updated.user.avatarUrl!.isNotEmpty &&
+            updated.user.avatarUrl != _profile?.avatarUrl) {
           timer.cancel();
-
           if (mounted && Navigator.of(context).canPop()) {
             Navigator.of(context).pop();
           }
-
           setState(() {
-            _fullProfile = updatedResponse;
-            _profile = updatedProfile;
+            _fullProfile = updated;
+            _profile = updated.user;
           });
           _showSnackBar('Avatar generated successfully');
         }
       } catch (e) {
         debugPrint('Polling error: $e');
       }
+    });
+  }
+
+  /// Cascade: category → clears grade + stream
+  void _onCategoryChanged(
+    CategoryModel? cat,
+    void Function(void Function()) sheetSetState,
+  ) {
+    if (cat == null) return;
+    sheetSetState(() {
+      setState(() {
+        _selectedCategory = cat;
+        _selectedGrade = null;
+        _selectedStream = null;
+        _filteredGrades = _allGrades
+            .where((g) => g.category == cat.value)
+            .toList();
+      });
+    });
+  }
+
+  /// Cascade: grade → clears stream if grade isn't A/L
+  void _onGradeChanged(
+    GradeModel? grade,
+    void Function(void Function()) sheetSetState,
+  ) {
+    sheetSetState(() {
+      setState(() {
+        _selectedGrade = grade;
+        if (grade == null || !grade.isAdvancedLevel) {
+          _selectedStream = null;
+        }
+      });
     });
   }
 
@@ -832,20 +1113,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _showSnackBar('Please enter your name', isError: true);
       return;
     }
-    if (_schoolController.text.trim().isEmpty) {
-      _showSnackBar('Please enter your school', isError: true);
-      return;
+
+    if (!_isGovCandidate) {
+      if (_selectedCategory == null) {
+        _showSnackBar('Please select your education category', isError: true);
+        return;
+      }
+      if (_selectedGrade == null) {
+        _showSnackBar('Please select your grade', isError: true);
+        return;
+      }
+      // A/L requires a stream
+      if (_selectedGrade!.isAdvancedLevel &&
+          (_selectedStream == null || _selectedStream!.isEmpty)) {
+        _showSnackBar('Please select your A/L stream', isError: true);
+        return;
+      }
+      if (_schoolController.text.trim().isEmpty) {
+        _showSnackBar('Please enter your school', isError: true);
+        return;
+      }
+      if (_selectedMedium == null || _selectedMedium!.isEmpty) {
+        _showSnackBar('Please select your medium', isError: true);
+        return;
+      }
     }
-    if (_selectedGrade == null) {
-      _showSnackBar('Please select your grade', isError: true);
-      return;
-    }
+
     if (_selectedDistrict == null || _selectedDistrict!.isEmpty) {
       _showSnackBar('Please select your district', isError: true);
-      return;
-    }
-    if (_selectedMedium == null || _selectedMedium!.isEmpty) {
-      _showSnackBar('Please select your medium', isError: true);
       return;
     }
 
@@ -853,16 +1148,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     sheetSetState(() {});
 
     try {
-      final updatedProfile = await _service.updateProfile(
+      final isAl = _selectedGrade?.isAdvancedLevel ?? false;
+
+      final updated = await _service.updateProfile(
         name: _nameController.text.trim(),
-        gradeId: _selectedGrade!.id,
-        school: _schoolController.text.trim(),
-        district: _selectedDistrict!,
-        preferredMedium: _selectedMedium!,
+        gradeId: _isGovCandidate ? null : _selectedGrade?.id,
+        gradeCategory: _isGovCandidate ? null : _selectedCategory?.value,
+        alStream: (_isGovCandidate || !isAl) ? null : _selectedStream,
+        school: _isGovCandidate ? null : _schoolController.text.trim(),
+        district: _selectedDistrict,
+        preferredMedium: _isGovCandidate ? null : _selectedMedium,
       );
 
       setState(() {
-        _profile = updatedProfile;
+        _profile = updated;
         _isSaving = false;
       });
 
@@ -908,7 +1207,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 bottom: MediaQuery.of(context).viewInsets.bottom,
               ),
               child: FractionallySizedBox(
-                heightFactor: 0.88,
+                heightFactor: 0.9,
                 child: Container(
                   decoration: const BoxDecoration(
                     color: _Palette.bgMid,
@@ -943,10 +1242,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           child: _ProfileForm(
                             nameController: _nameController,
                             schoolController: _schoolController,
-                            grades: _grades,
+                            categories: _categories,
+                            selectedCategory: _selectedCategory,
+                            onCategoryChanged: (c) =>
+                                _onCategoryChanged(c, sheetSetState),
+                            grades: _filteredGrades,
                             selectedGrade: _selectedGrade,
-                            onGradeChanged: (g) => sheetSetState(() {
-                              setState(() => _selectedGrade = g);
+                            onGradeChanged: (g) =>
+                                _onGradeChanged(g, sheetSetState),
+                            selectedStream: _selectedStream,
+                            onStreamChanged: (s) => sheetSetState(() {
+                              setState(() => _selectedStream = s);
                             }),
                             selectedDistrict: _selectedDistrict,
                             onDistrictChanged: (d) => sheetSetState(() {
@@ -956,6 +1262,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             onMediumChanged: (m) => sheetSetState(() {
                               setState(() => _selectedMedium = m);
                             }),
+                            isGovCandidate: _isGovCandidate,
                           ),
                         ),
                       ),
@@ -1024,7 +1331,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 }
 
 // ------------------------------------------------------------
-// Background — the aurora/hex-grid artwork
+// Background
 // ------------------------------------------------------------
 class _AuroraBackground extends StatelessWidget {
   const _AuroraBackground();
@@ -1351,7 +1658,7 @@ class _ErrorView extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Profile Content — UPDATED with fullProfile
+// Profile Content
 // ------------------------------------------------------------
 class _ProfileContent extends StatelessWidget {
   const _ProfileContent({
@@ -1380,8 +1687,6 @@ class _ProfileContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final gradeName = selectedGrade?.name ?? profile.grade.name;
-
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
       child: Column(
@@ -1389,7 +1694,7 @@ class _ProfileContent extends StatelessWidget {
         children: [
           _ProfileHeroCard(
             profile: profile,
-            gradeName: gradeName,
+            gradeName: selectedGrade?.name ?? profile.grade?.name,
             statistics: fullProfile.statistics,
             uploading: uploadingAvatar,
             onAvatarTap: onAvatarTap,
@@ -1443,7 +1748,7 @@ class _ProfileContent extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Reusable glass card
+// Glass card
 // ------------------------------------------------------------
 class _GlassCard extends StatelessWidget {
   const _GlassCard({required this.child, this.padding, this.borderColor});
@@ -1535,7 +1840,7 @@ class _SectionHeader extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Profile hero card — UPDATED with statistics
+// Profile hero card
 // ------------------------------------------------------------
 class _ProfileHeroCard extends StatelessWidget {
   const _ProfileHeroCard({
@@ -1547,7 +1852,7 @@ class _ProfileHeroCard extends StatelessWidget {
   });
 
   final ProfileModel profile;
-  final String gradeName;
+  final String? gradeName;
   final ProfileStatistics statistics;
   final bool uploading;
   final VoidCallback onAvatarTap;
@@ -1571,6 +1876,10 @@ class _ProfileHeroCard extends StatelessWidget {
             gradeName: gradeName,
             medium: profile.preferredMedium,
             targetExam: profile.targetExam,
+            userCategory: profile.userCategory,
+            district: profile.district,
+            alStream: profile.alStream,
+            gradeCategory: profile.gradeCategory,
           );
 
           if (isNarrow) {
@@ -1579,7 +1888,6 @@ class _ProfileHeroCard extends StatelessWidget {
               children: [avatar, const SizedBox(height: 16), info],
             );
           }
-
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1825,7 +2133,6 @@ class _LevelXpBadge extends StatelessWidget {
   }
 }
 
-// UPDATED: ProfileInfoBlock with targetExam
 class _ProfileInfoBlock extends StatelessWidget {
   const _ProfileInfoBlock({
     required this.name,
@@ -1833,16 +2140,28 @@ class _ProfileInfoBlock extends StatelessWidget {
     required this.gradeName,
     required this.medium,
     this.targetExam,
+    this.userCategory,
+    this.district,
+    this.alStream,
+    this.gradeCategory,
   });
 
   final String name;
-  final String school;
-  final String gradeName;
-  final String medium;
+  final String? school;
+  final String? gradeName;
+  final String? medium;
   final String? targetExam;
+  final String? userCategory;
+  final String? district;
+  final String? alStream;
+  final String? gradeCategory;
+
+  bool get _isGov =>
+      (userCategory ?? '').trim().toLowerCase() == 'government exam candidate';
 
   @override
   Widget build(BuildContext context) {
+    final streamLabel = AlStreamOption.labelFor(alStream);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1855,7 +2174,28 @@ class _ProfileInfoBlock extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        if (school.isNotEmpty)
+        if (_isGov)
+          Row(
+            children: [
+              const Icon(
+                Icons.location_on_rounded,
+                size: 14,
+                color: _Palette.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  district ?? 'Sri Lanka',
+                  style: const TextStyle(
+                    color: _Palette.textSecondary,
+                    fontSize: 13.5,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          )
+        else if (school != null && school!.isNotEmpty)
           Row(
             children: [
               const Icon(
@@ -1866,7 +2206,7 @@ class _ProfileInfoBlock extends StatelessWidget {
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
-                  school,
+                  school!,
                   style: const TextStyle(
                     color: _Palette.textSecondary,
                     fontSize: 13.5,
@@ -1881,9 +2221,17 @@ class _ProfileInfoBlock extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            if (gradeName.isNotEmpty)
-              _NeonChip(label: gradeName, color: _Palette.neonViolet),
-            if (medium.isNotEmpty)
+            if (_isGov)
+              _NeonChip(
+                label: 'Government Exam Candidate',
+                color: _Palette.neonGold,
+              )
+            else if (gradeName != null && gradeName!.isNotEmpty)
+              _NeonChip(label: gradeName!, color: _Palette.neonViolet),
+            // A/L stream chip
+            if (streamLabel.isNotEmpty)
+              _NeonChip(label: streamLabel, color: _Palette.neonPink),
+            if (medium != null && medium!.isNotEmpty)
               _NeonChip(label: '$medium Medium', color: _Palette.neonCyan),
             if (targetExam != null && targetExam!.isNotEmpty)
               _NeonChip(label: targetExam!, color: _Palette.neonGold),
@@ -1921,11 +2269,10 @@ class _NeonChip extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Ranking card — UPDATED with backend data
+// Ranking card
 // ------------------------------------------------------------
 class _RankingCard extends StatelessWidget {
   const _RankingCard({required this.ranking, required this.streakDays});
-
   final ProfileRanking ranking;
   final int streakDays;
 
@@ -2016,7 +2363,7 @@ class _RankStat extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Achievements — UPDATED with backend data
+// Achievements
 // ------------------------------------------------------------
 class _AchievementsRow extends StatelessWidget {
   const _AchievementsRow({required this.achievements});
@@ -2032,17 +2379,14 @@ class _AchievementsRow extends StatelessWidget {
         ),
       );
     }
-
     return SizedBox(
       height: 128,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: achievements.length,
         separatorBuilder: (_, __) => const SizedBox(width: 12),
-        itemBuilder: (context, i) {
-          final a = achievements[i];
-          return _AchievementCard(achievement: a);
-        },
+        itemBuilder: (context, i) =>
+            _AchievementCard(achievement: achievements[i]),
       ),
     );
   }
@@ -2054,17 +2398,13 @@ class _AchievementCard extends StatelessWidget {
 
   Color _getColor() {
     if (achievement.color != null) {
-      return Color(int.parse(achievement.color!.replaceFirst('#', '0xFF')));
+      try {
+        return Color(int.parse(achievement.color!.replaceFirst('#', '0xFF')));
+      } catch (_) {
+        return _Palette.neonGold;
+      }
     }
     return _Palette.neonGold;
-  }
-
-  IconData _getIcon() {
-    if (achievement.icon != null) {
-      // Try to parse icon name if stored as string
-      return Icons.emoji_events_rounded;
-    }
-    return Icons.emoji_events_rounded;
   }
 
   @override
@@ -2091,7 +2431,7 @@ class _AchievementCard extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Icon(_getIcon(), color: color, size: 22),
+              child: Icon(Icons.emoji_events_rounded, color: color, size: 22),
             ),
             const SizedBox(height: 10),
             Text(
@@ -2125,7 +2465,7 @@ class _AchievementCard extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Learning analytics — UPDATED with backend data
+// Learning analytics
 // ------------------------------------------------------------
 class _LearningAnalyticsSection extends StatelessWidget {
   const _LearningAnalyticsSection({
@@ -2143,11 +2483,7 @@ class _LearningAnalyticsSection extends StatelessWidget {
   String _formatMinutes(int minutes) {
     final hours = minutes ~/ 60;
     final mins = minutes % 60;
-
-    if (hours == 0) {
-      return '${mins}m';
-    }
-
+    if (hours == 0) return '${mins}m';
     return '${hours}h ${mins}m';
   }
 
@@ -2281,7 +2617,7 @@ class _StatTile extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Weekly chart — UPDATED with backend data
+// Weekly chart
 // ------------------------------------------------------------
 class _WeeklyProgressChart extends StatelessWidget {
   const _WeeklyProgressChart({required this.data});
@@ -2379,7 +2715,6 @@ class _WeeklyProgressPainter extends CustomPainter {
       return Offset(stepX * i, y);
     }
 
-    // Grid lines
     final gridPaint = Paint()
       ..color = _Palette.cardBorder
       ..strokeWidth = 1;
@@ -2442,7 +2777,7 @@ class _WeeklyProgressPainter extends CustomPainter {
 }
 
 // ------------------------------------------------------------
-// Strongest Subject — UPDATED with backend data
+// Strongest / AI
 // ------------------------------------------------------------
 class _StrongestSubjectCard extends StatelessWidget {
   const _StrongestSubjectCard({required this.subject});
@@ -2450,7 +2785,7 @@ class _StrongestSubjectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (subject == null) {
+    if (subject == null || subject!.name.isEmpty) {
       return const _GlassCard(
         child: _EmptyRow(
           icon: Icons.star_border_rounded,
@@ -2458,21 +2793,16 @@ class _StrongestSubjectCard extends StatelessWidget {
         ),
       );
     }
-
     return _GlassCard(
       borderColor: _Palette.neonGold.withValues(alpha: 0.35),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: [
-              const Icon(
-                Icons.star_rounded,
-                color: _Palette.neonGold,
-                size: 18,
-              ),
-              const SizedBox(width: 6),
-              const Text(
+            children: const [
+              Icon(Icons.star_rounded, color: _Palette.neonGold, size: 18),
+              SizedBox(width: 6),
+              Text(
                 'Strongest Subject',
                 style: TextStyle(color: _Palette.textSecondary, fontSize: 12),
               ),
@@ -2502,9 +2832,6 @@ class _StrongestSubjectCard extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// AI Improvement — UPDATED with backend data
-// ------------------------------------------------------------
 class _AiImprovementCard extends StatelessWidget {
   const _AiImprovementCard({required this.improvement});
   final AiImprovementModel? improvement;
@@ -2520,7 +2847,6 @@ class _AiImprovementCard extends StatelessWidget {
         ),
       );
     }
-
     return _GlassCard(
       borderColor: _Palette.neonViolet.withValues(alpha: 0.35),
       child: Column(
@@ -2571,7 +2897,7 @@ class _AiImprovementCard extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Subject progress — UPDATED with backend data
+// Subject progress
 // ------------------------------------------------------------
 class _SubjectProgressRow extends StatelessWidget {
   const _SubjectProgressRow({required this.subjects});
@@ -2591,7 +2917,6 @@ class _SubjectProgressRow extends StatelessWidget {
       case 'information technology':
         return Icons.computer_rounded;
       case 'sinhala':
-        return Icons.language_rounded;
       case 'tamil':
         return Icons.language_rounded;
       default:
@@ -2631,7 +2956,6 @@ class _SubjectProgressRow extends StatelessWidget {
         ),
       );
     }
-
     return SizedBox(
       height: 168,
       child: ListView.separated(
@@ -2843,7 +3167,7 @@ class _BattleStatisticsCard extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Generic empty-state row
+// Empty row
 // ------------------------------------------------------------
 class _EmptyRow extends StatelessWidget {
   const _EmptyRow({required this.icon, required this.text});
@@ -3052,33 +3376,50 @@ class _GradientButton extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// Edit-profile form
+// Edit-profile form — new cascade: Category → Grade → Stream
 // ------------------------------------------------------------
 class _ProfileForm extends StatelessWidget {
   const _ProfileForm({
     required this.nameController,
     required this.schoolController,
+    required this.categories,
+    required this.selectedCategory,
+    required this.onCategoryChanged,
     required this.grades,
     required this.selectedGrade,
     required this.onGradeChanged,
+    required this.selectedStream,
+    required this.onStreamChanged,
     required this.selectedDistrict,
     required this.onDistrictChanged,
     required this.selectedMedium,
     required this.onMediumChanged,
+    required this.isGovCandidate,
   });
 
   final TextEditingController nameController;
   final TextEditingController schoolController;
+  final List<CategoryModel> categories;
+  final CategoryModel? selectedCategory;
+  final ValueChanged<CategoryModel?> onCategoryChanged;
   final List<GradeModel> grades;
   final GradeModel? selectedGrade;
-  final ValueChanged<GradeModel> onGradeChanged;
+  final ValueChanged<GradeModel?> onGradeChanged;
+  final String? selectedStream;
+  final ValueChanged<String?> onStreamChanged;
   final String? selectedDistrict;
   final ValueChanged<String> onDistrictChanged;
   final String? selectedMedium;
   final ValueChanged<String> onMediumChanged;
+  final bool isGovCandidate;
 
   @override
   Widget build(BuildContext context) {
+    final showStream =
+        !isGovCandidate &&
+        selectedGrade != null &&
+        selectedGrade!.isAdvancedLevel;
+
     return _GlassCard(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Column(
@@ -3098,37 +3439,77 @@ class _ProfileForm extends StatelessWidget {
               style: const TextStyle(fontSize: 15, color: _Palette.textPrimary),
             ),
           ),
-          const Divider(height: 1, color: _Palette.cardBorder),
-          _FormField(
-            label: 'Grade',
-            icon: Icons.school_outlined,
-            child: _DarkDropdown<GradeModel>(
-              value: selectedGrade,
-              hint: 'Select your grade',
-              items: grades
-                  .map((g) => DropdownMenuItem(value: g, child: Text(g.name)))
-                  .toList(),
-              onChanged: (grade) {
-                if (grade != null) onGradeChanged(grade);
-              },
-            ),
-          ),
-          const Divider(height: 1, color: _Palette.cardBorder),
-          _FormField(
-            label: 'School',
-            icon: Icons.business_outlined,
-            child: TextField(
-              controller: schoolController,
-              cursorColor: _Palette.neonCyan,
-              decoration: const InputDecoration(
-                hintText: 'Enter your school name',
-                hintStyle: TextStyle(color: _Palette.textMuted),
-                border: InputBorder.none,
-                isDense: true,
+
+          if (!isGovCandidate) ...[
+            const Divider(height: 1, color: _Palette.cardBorder),
+            _FormField(
+              label: 'Category',
+              icon: Icons.category_outlined,
+              child: _DarkDropdown<CategoryModel>(
+                value: selectedCategory,
+                hint: 'Select education category',
+                items: categories
+                    .map((c) => DropdownMenuItem(value: c, child: Text(c.text)))
+                    .toList(),
+                onChanged: onCategoryChanged,
               ),
-              style: const TextStyle(fontSize: 15, color: _Palette.textPrimary),
             ),
-          ),
+            const Divider(height: 1, color: _Palette.cardBorder),
+            _FormField(
+              label: 'Grade',
+              icon: Icons.school_outlined,
+              child: _DarkDropdown<GradeModel>(
+                value: selectedGrade,
+                hint: selectedCategory == null
+                    ? 'Select category first'
+                    : 'Select your grade',
+                items: grades
+                    .map((g) => DropdownMenuItem(value: g, child: Text(g.name)))
+                    .toList(),
+                onChanged: selectedCategory == null ? null : onGradeChanged,
+              ),
+            ),
+            if (showStream) ...[
+              const Divider(height: 1, color: _Palette.cardBorder),
+              _FormField(
+                label: 'Stream',
+                icon: Icons.account_tree_outlined,
+                child: _DarkDropdown<String>(
+                  value: selectedStream,
+                  hint: 'Select A/L stream',
+                  items: AlStreamOption.all
+                      .map(
+                        (s) => DropdownMenuItem(
+                          value: s.value,
+                          child: Text(s.text),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: onStreamChanged,
+                ),
+              ),
+            ],
+            const Divider(height: 1, color: _Palette.cardBorder),
+            _FormField(
+              label: 'School',
+              icon: Icons.business_outlined,
+              child: TextField(
+                controller: schoolController,
+                cursorColor: _Palette.neonCyan,
+                decoration: const InputDecoration(
+                  hintText: 'Enter your school name',
+                  hintStyle: TextStyle(color: _Palette.textMuted),
+                  border: InputBorder.none,
+                  isDense: true,
+                ),
+                style: const TextStyle(
+                  fontSize: 15,
+                  color: _Palette.textPrimary,
+                ),
+              ),
+            ),
+          ],
+
           const Divider(height: 1, color: _Palette.cardBorder),
           _FormField(
             label: 'District',
@@ -3139,26 +3520,29 @@ class _ProfileForm extends StatelessWidget {
               items: ProfileService.districts
                   .map((d) => DropdownMenuItem(value: d, child: Text(d)))
                   .toList(),
-              onChanged: (district) {
-                if (district != null) onDistrictChanged(district);
+              onChanged: (d) {
+                if (d != null) onDistrictChanged(d);
               },
             ),
           ),
-          const Divider(height: 1, color: _Palette.cardBorder),
-          _FormField(
-            label: 'Medium',
-            icon: Icons.translate_rounded,
-            child: _DarkDropdown<String>(
-              value: selectedMedium,
-              hint: 'Select your medium',
-              items: ProfileService.mediums
-                  .map((m) => DropdownMenuItem(value: m, child: Text(m)))
-                  .toList(),
-              onChanged: (medium) {
-                if (medium != null) onMediumChanged(medium);
-              },
+
+          if (!isGovCandidate) ...[
+            const Divider(height: 1, color: _Palette.cardBorder),
+            _FormField(
+              label: 'Medium',
+              icon: Icons.translate_rounded,
+              child: _DarkDropdown<String>(
+                value: selectedMedium,
+                hint: 'Select your medium',
+                items: ProfileService.mediums
+                    .map((m) => DropdownMenuItem(value: m, child: Text(m)))
+                    .toList(),
+                onChanged: (m) {
+                  if (m != null) onMediumChanged(m);
+                },
+              ),
             ),
-          ),
+          ],
           const SizedBox(height: 4),
         ],
       ),
@@ -3177,10 +3561,11 @@ class _DarkDropdown<T> extends StatelessWidget {
   final T? value;
   final String hint;
   final List<DropdownMenuItem<T>> items;
-  final ValueChanged<T?> onChanged;
+  final ValueChanged<T?>? onChanged;
 
   @override
   Widget build(BuildContext context) {
+    final disabled = onChanged == null || items.isEmpty;
     return DropdownButtonHideUnderline(
       child: DropdownButton<T>(
         value: value,
@@ -3197,7 +3582,7 @@ class _DarkDropdown<T> extends StatelessWidget {
         ),
         style: const TextStyle(color: _Palette.textPrimary, fontSize: 15),
         items: items,
-        onChanged: onChanged,
+        onChanged: disabled ? null : onChanged,
       ),
     );
   }
@@ -3301,7 +3686,7 @@ class _SaveButton extends StatelessWidget {
                           color: Colors.white,
                           size: 20,
                         ),
-                        const SizedBox(width: 8),
+                        SizedBox(width: 8),
                         Text(
                           'Save Changes',
                           style: TextStyle(

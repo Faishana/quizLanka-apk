@@ -1,7 +1,8 @@
 // review_screen.dart
-// ============================================================
-// 1. IMPORTS
-// ============================================================
+// Light theme — scrollable single-list review.
+// Ticket: all questions viewable in one scroll (no Next/Prev pagination).
+// Presentation refreshed to match the light theme used across the app.
+
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -11,40 +12,43 @@ import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/config/appTheam.dart';
 
 // ============================================================
-// 2. THEME — Aurora Glass, matching Dashboard / Profile / Nav.
-// If appTheam.dart already exposes matching tokens (background
-// gradient, glass card color, primary text color), swap those
-// in below instead of the hardcoded fallbacks so every screen
-// pulls from one source of truth.
+// 2. LIGHT THEME TOKENS
 // ============================================================
 class ReviewTheme {
-  static const Color primary = AppTheme.violet;
-  static const Color bgTop = Color(0xFF0E0C29);
-  static const Color bgBottom = Color(0xFF1B1540);
-  static const Color card = Color(0xFF1C1A3D);
-  static const Color cardBorder = Colors.white;
-  static const Color textDark = Colors.white; // primary text, kept name for
-  // minimal diff with original file
-  static const Color textMid = Color(0xFFA0A3BD);
-  static const Color textLight = Color(0xFF6B6890);
-  static const Color success = Color(0xFF4ADE80);
-  static const Color danger = Color(0xFFEF5A6C);
-  static const Color divider = Color(0xFF2A2854);
-  static const Color explanationBg = Color(0xFF352A12);
-  static const Color explanationBorder = Color(0xFF6B4E16);
-  static const Color explanationAccent = Color(0xFFFBBF52);
-  static const Color explanationText = Color(0xFFF4D9A0);
-  static const Color shadow = Color(0x66000000);
+  // Surfaces
+  static const Color background = Color(0xFFF7F8FC);
+  static const Color surface = Colors.white;
+  static const Color surfaceMuted = Color(0xFFF1F3F9);
+  static const Color border = Color(0xFFE4E7F0);
+  static const Color borderStrong = Color(0xFFCBD1E0);
 
-  // Educational-content font. Applied ONLY to actual question /
-  // answer / explanation text — never to buttons, labels, badges,
-  // or other UI chrome, which all stay on the app-wide Poppins
-  // theme font set in main.dart.
+  // Text
+  static const Color textPrimary = Color(0xFF1A1D2B);
+  static const Color textSecondary = Color(0xFF5A6072);
+  static const Color textMuted = Color(0xFF8A90A2);
+
+  // States
+  static const Color primary = AppTheme.violet; // kept violet accent
+  static const Color success = Color(0xFF16A34A);
+  static const Color successSoft = Color(0xFFE7F7EE);
+  static const Color successBorder = Color(0xFFBBE7CE);
+
+  static const Color danger = Color(0xFFDC2626);
+  static const Color dangerSoft = Color(0xFFFDECEC);
+  static const Color dangerBorder = Color(0xFFF5C6C6);
+
+  // Explanation callout
+  static const Color explanationBg = Color(0xFFFFF8EB);
+  static const Color explanationBorder = Color(0xFFFBE3B8);
+  static const Color explanationAccent = Color(0xFFB45309);
+  static const Color explanationText = Color(0xFF5A3F0E);
+
+  // Content font
   static const String contentFont = 'AbhayaLibre';
 }
 
 // ============================================================
-// 3. MODELS  (unchanged)
+// 3. MODELS (unchanged)
 // ============================================================
 
 class ReviewOption {
@@ -201,7 +205,7 @@ class ReviewData {
 }
 
 // ============================================================
-// 4. REVIEW SERVICE  (unchanged — logic untouched)
+// 4. REVIEW SERVICE (unchanged)
 // ============================================================
 
 class ReviewService {
@@ -262,7 +266,7 @@ class ReviewService {
 }
 
 // ============================================================
-// 5. REVIEW SCREEN
+// 5. REVIEW SCREEN — SCROLLABLE SINGLE LIST (light theme)
 // ============================================================
 
 class ReviewScreen extends StatefulWidget {
@@ -277,7 +281,9 @@ class ReviewScreen extends StatefulWidget {
 class _ReviewScreenState extends State<ReviewScreen> {
   final ReviewService _service = ReviewService();
   late Future<ReviewData> _reviewFuture;
-  int _currentIndex = 0;
+
+  final ScrollController _scrollController = ScrollController();
+  final Map<int, GlobalKey> _questionKeys = {};
 
   @override
   void initState() {
@@ -290,187 +296,242 @@ class _ReviewScreenState extends State<ReviewScreen> {
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _service.dispose();
     super.dispose();
   }
 
-  void _goToPrevious() {
-    if (_currentIndex > 0) {
-      setState(() {
-        _currentIndex--;
-      });
-    }
-  }
+  GlobalKey _keyFor(int index) =>
+      _questionKeys.putIfAbsent(index, () => GlobalKey());
 
-  void _goToNext(ReviewData data) {
-    if (_currentIndex < data.questions.length - 1) {
-      setState(() {
-        _currentIndex++;
-      });
+  void _scrollToQuestion(int index) {
+    final key = _questionKeys[index];
+    final ctx = key?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+        alignment: 0.05,
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true,
-      backgroundColor: ReviewTheme.bgTop,
+      backgroundColor: ReviewTheme.background,
       appBar: AppBar(
         title: const Text(
           'Review Answers',
           style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: ReviewTheme.textDark,
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: ReviewTheme.textPrimary,
           ),
         ),
-        backgroundColor: Colors.transparent,
+        backgroundColor: ReviewTheme.surface,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
+        scrolledUnderElevation: 0.5,
+        shadowColor: const Color(0xFF1A1D2B).withValues(alpha: 0.08),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => Navigator.pop(context),
-          color: ReviewTheme.textDark,
+          color: ReviewTheme.textPrimary,
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: ReviewTheme.border),
         ),
       ),
       body: Stack(
         children: [
-          // Aurora background — same soft glow-blob treatment as
-          // Dashboard / Profile so this screen feels like one app.
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [ReviewTheme.bgTop, ReviewTheme.bgBottom],
-                ),
-              ),
-              child: Stack(
-                children: [
-                  Positioned(
-                    top: -50,
-                    right: -50,
-                    child: _GlowBlob(
-                      color: AppTheme.violet.withValues(alpha: 0.26),
-                      size: 220,
-                    ),
-                  ),
-                  Positioned(
-                    top: 220,
-                    left: -60,
-                    child: _GlowBlob(
-                      color: ReviewTheme.success.withValues(alpha: 0.12),
-                      size: 200,
-                    ),
-                  ),
-                ],
-              ),
+          // Soft pastel orbs for subtle depth
+          Positioned(
+            top: -80,
+            right: -60,
+            child: _GlowOrb(
+              color: AppTheme.violet.withValues(alpha: 0.10),
+              size: 240,
             ),
           ),
-          SafeArea(
-            child: FutureBuilder<ReviewData>(
-              future: _reviewFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(
-                      color: ReviewTheme.primary,
-                      strokeWidth: 2.5,
-                    ),
-                  );
-                }
+          Positioned(
+            top: 260,
+            left: -80,
+            child: _GlowOrb(
+              color: ReviewTheme.success.withValues(alpha: 0.08),
+              size: 220,
+            ),
+          ),
+          FutureBuilder<ReviewData>(
+            future: _reviewFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(
+                    color: ReviewTheme.primary,
+                    strokeWidth: 2.5,
+                  ),
+                );
+              }
 
-                if (snapshot.hasError) {
-                  return _ErrorView(
-                    message: snapshot.error.toString(),
-                    onRetry: () {
-                      setState(() {
-                        _reviewFuture = _service
-                            .getReview(widget.quizId)
-                            .catchError((error) {
-                              return ReviewData.empty();
-                            });
-                      });
-                    },
-                  );
-                }
+              if (snapshot.hasError) {
+                return _ErrorView(
+                  message: snapshot.error.toString(),
+                  onRetry: () {
+                    setState(() {
+                      _reviewFuture = _service
+                          .getReview(widget.quizId)
+                          .catchError((_) {
+                            return ReviewData.empty();
+                          });
+                    });
+                  },
+                );
+              }
 
-                final data = snapshot.data!;
-                if (data.questions.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32.0),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
+              final data = snapshot.data!;
+              if (data.questions.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: ReviewTheme.surfaceMuted,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: ReviewTheme.border),
+                          ),
+                          child: const Icon(
                             Icons.quiz_outlined,
-                            size: 64,
-                            color: ReviewTheme.textLight,
+                            size: 34,
+                            color: ReviewTheme.textMuted,
                           ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'No review data available.',
-                            style: TextStyle(
-                              color: ReviewTheme.textMid,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
+                        ),
+                        const SizedBox(height: 18),
+                        const Text(
+                          'No review data available.',
+                          style: TextStyle(
+                            color: ReviewTheme.textPrimary,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
                           ),
-                          const SizedBox(height: 8),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Complete a quiz to see your review.',
+                          style: TextStyle(
+                            color: ReviewTheme.textSecondary,
+                            fontSize: 13.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              return CustomScrollView(
+                controller: _scrollController,
+                slivers: [
+                  // Header summary
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                      child: _ReviewHeader(
+                        correctCount: data.correctCount,
+                        totalQuestions: data.totalQuestions,
+                        scorePercentage: data.scorePercentage,
+                      ),
+                    ),
+                  ),
+
+                  // Jump-to-question chips
+                  SliverToBoxAdapter(
+                    child: _QuestionChips(
+                      total: data.questions.length,
+                      onTap: _scrollToQuestion,
+                    ),
+                  ),
+
+                  // Section title
+                  const SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(20, 20, 20, 10),
+                      child: Row(
+                        children: [
                           Text(
-                            'Complete a quiz to see your review.',
+                            'All Questions',
                             style: TextStyle(
-                              color: ReviewTheme.textLight,
-                              fontSize: 14,
+                              color: ReviewTheme.textPrimary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
                             ),
                           ),
                         ],
                       ),
                     ),
-                  );
-                }
+                  ),
 
-                return Column(
-                  children: [
-                    const SizedBox(height: 8),
-                    // Header Summary
-                    _ReviewHeader(
-                      correctCount: data.correctCount,
-                      totalQuestions: data.totalQuestions,
-                      scorePercentage: data.scorePercentage,
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Progress
-                    _QuestionProgress(
-                      currentIndex: _currentIndex,
-                      totalQuestions: data.totalQuestions,
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Question Card
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                  // Question cards
+                  SliverList.builder(
+                    itemCount: data.questions.length,
+                    itemBuilder: (context, index) {
+                      return Padding(
+                        key: _keyFor(index),
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                         child: _QuestionCard(
-                          question: data.questions[_currentIndex],
-                          questionNumber: _currentIndex + 1,
+                          question: data.questions[index],
+                          questionNumber: index + 1,
+                        ),
+                      );
+                    },
+                  ),
+
+                  // Done button footer
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: ReviewTheme.primary,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Done',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Icon(Icons.check_rounded, size: 20),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-
-                    // Bottom Navigation
-                    _BottomNav(
-                      currentIndex: _currentIndex,
-                      totalQuestions: data.totalQuestions,
-                      onPrevious: _goToPrevious,
-                      onNext: () => _goToNext(data),
-                    ),
-                  ],
-                );
-              },
-            ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -479,10 +540,10 @@ class _ReviewScreenState extends State<ReviewScreen> {
 }
 
 // ------------------------------------------------------------
-// Soft radial glow blob used for the aurora background
+// Soft radial glow orb
 // ------------------------------------------------------------
-class _GlowBlob extends StatelessWidget {
-  const _GlowBlob({required this.color, required this.size});
+class _GlowOrb extends StatelessWidget {
+  const _GlowOrb({required this.color, required this.size});
 
   final Color color;
   final double size;
@@ -503,12 +564,10 @@ class _GlowBlob extends StatelessWidget {
 }
 
 // ============================================================
-// 6. WIDGETS
+// 6. WIDGETS (light theme)
 // ============================================================
 
-// ------------------------------------------------------------
-// 6.1 Error View — UI chrome, stays Poppins
-// ------------------------------------------------------------
+// 6.1 Error view
 class _ErrorView extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
@@ -532,15 +591,13 @@ class _ErrorView extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: ReviewTheme.danger.withValues(alpha: 0.12),
+                color: ReviewTheme.dangerSoft,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: ReviewTheme.danger.withValues(alpha: 0.3),
-                ),
+                border: Border.all(color: ReviewTheme.dangerBorder),
               ),
               child: const Icon(
                 Icons.error_outline_rounded,
-                size: 36,
+                size: 34,
                 color: ReviewTheme.danger,
               ),
             ),
@@ -548,16 +605,20 @@ class _ErrorView extends StatelessWidget {
             const Text(
               'Unable to load review',
               style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: ReviewTheme.textDark,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: ReviewTheme.textPrimary,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               displayMessage,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: ReviewTheme.textMid, fontSize: 14),
+              style: const TextStyle(
+                color: ReviewTheme.textSecondary,
+                fontSize: 13.5,
+                height: 1.5,
+              ),
             ),
             const SizedBox(height: 24),
             ElevatedButton(
@@ -571,10 +632,13 @@ class _ErrorView extends StatelessWidget {
                   vertical: 14,
                 ),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: const Text('Retry'),
+              child: const Text(
+                'Retry',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              ),
             ),
           ],
         ),
@@ -583,11 +647,9 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.2 Glass card wrapper — shared look for header / question card
-// ------------------------------------------------------------
-class _GlassCard extends StatelessWidget {
-  const _GlassCard({required this.child, this.padding, this.margin});
+// 6.2 White card wrapper
+class _SurfaceCard extends StatelessWidget {
+  const _SurfaceCard({required this.child, this.padding, this.margin});
 
   final Widget child;
   final EdgeInsetsGeometry? padding;
@@ -600,16 +662,14 @@ class _GlassCard extends StatelessWidget {
       margin: margin,
       padding: padding ?? const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: ReviewTheme.card.withValues(alpha: 0.9),
+        color: ReviewTheme.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: ReviewTheme.cardBorder.withValues(alpha: 0.08),
-        ),
-        boxShadow: const [
+        border: Border.all(color: ReviewTheme.border),
+        boxShadow: [
           BoxShadow(
-            color: ReviewTheme.shadow,
-            blurRadius: 20,
-            offset: Offset(0, 8),
+            color: const Color(0xFF1A1D2B).withValues(alpha: 0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -618,9 +678,7 @@ class _GlassCard extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.3 Review Header — UI chrome (stats), stays Poppins
-// ------------------------------------------------------------
+// 6.3 Header summary
 class _ReviewHeader extends StatelessWidget {
   final int correctCount;
   final int totalQuestions;
@@ -634,34 +692,48 @@ class _ReviewHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _GlassCard(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
+    return _SurfaceCard(
+      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _StatItem(
-            label: 'Score',
-            value: '$correctCount/$totalQuestions',
-            color: ReviewTheme.primary,
+          Expanded(
+            child: _StatItem(
+              label: 'Score',
+              value: '$correctCount/$totalQuestions',
+              color: ReviewTheme.primary,
+            ),
           ),
-          _StatItem(
-            label: 'Correct',
-            value: '$correctCount',
-            color: ReviewTheme.success,
+          _verticalDivider(),
+          Expanded(
+            child: _StatItem(
+              label: 'Correct',
+              value: '$correctCount',
+              color: ReviewTheme.success,
+            ),
           ),
-          _StatItem(
-            label: 'Wrong',
-            value: '${totalQuestions - correctCount}',
-            color: ReviewTheme.danger,
+          _verticalDivider(),
+          Expanded(
+            child: _StatItem(
+              label: 'Wrong',
+              value: '${totalQuestions - correctCount}',
+              color: ReviewTheme.danger,
+            ),
           ),
-          _StatItem(
-            label: 'Percentage',
-            value: '${scorePercentage.toStringAsFixed(0)}%',
-            color: ReviewTheme.primary,
+          _verticalDivider(),
+          Expanded(
+            child: _StatItem(
+              label: 'Percentage',
+              value: '${scorePercentage.toStringAsFixed(0)}%',
+              color: ReviewTheme.primary,
+            ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _verticalDivider() {
+    return Container(width: 1, height: 34, color: ReviewTheme.border);
   }
 }
 
@@ -683,18 +755,20 @@ class _StatItem extends StatelessWidget {
         Text(
           value,
           style: TextStyle(
-            fontSize: 16,
+            fontSize: 17,
             fontWeight: FontWeight.w800,
             color: color,
+            height: 1.1,
           ),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 4),
         Text(
           label,
           style: const TextStyle(
-            fontSize: 11,
-            color: ReviewTheme.textLight,
-            fontWeight: FontWeight.w500,
+            fontSize: 10.5,
+            color: ReviewTheme.textMuted,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
           ),
         ),
       ],
@@ -702,71 +776,57 @@ class _StatItem extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.4 Question Progress — UI chrome, stays Poppins
-// ------------------------------------------------------------
-class _QuestionProgress extends StatelessWidget {
-  final int currentIndex;
-  final int totalQuestions;
+// 6.4 Jump-to-question chips
+class _QuestionChips extends StatelessWidget {
+  final int total;
+  final void Function(int index) onTap;
 
-  const _QuestionProgress({
-    required this.currentIndex,
-    required this.totalQuestions,
-  });
+  const _QuestionChips({required this.total, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final progress = totalQuestions > 0
-        ? (currentIndex + 1) / totalQuestions
-        : 0.0;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Question ${currentIndex + 1} of $totalQuestions',
-                style: const TextStyle(
-                  color: ReviewTheme.textDark,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
-              ),
-              Text(
-                '${(progress * 100).toStringAsFixed(0)}%',
-                style: const TextStyle(
-                  color: ReviewTheme.textMid,
-                  fontWeight: FontWeight.w500,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: LinearProgressIndicator(
-              value: progress,
-              backgroundColor: ReviewTheme.divider,
-              valueColor: const AlwaysStoppedAnimation<Color>(
-                ReviewTheme.primary,
-              ),
-              minHeight: 6,
+    return SizedBox(
+      height: 40,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: total,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          return Material(
+            color: ReviewTheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: const BorderSide(color: ReviewTheme.border, width: 1),
             ),
-          ),
-        ],
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => onTap(index),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                child: Center(
+                  child: Text(
+                    'Q${index + 1}',
+                    style: const TextStyle(
+                      color: ReviewTheme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 }
 
-// ------------------------------------------------------------
-// 6.5 Question Card
-// ------------------------------------------------------------
+// 6.5 Question card
 class _QuestionCard extends StatelessWidget {
   final ReviewQuestion question;
   final int questionNumber;
@@ -775,364 +835,285 @@ class _QuestionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _GlassCard(
+    return _SurfaceCard(
       padding: const EdgeInsets.all(20),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Question number and status — UI chrome, stays Poppins
-            Row(
-              children: [
-                Text(
-                  'Question $questionNumber',
-                  style: const TextStyle(
-                    color: ReviewTheme.textDark,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: question.isCorrect
-                        ? ReviewTheme.success.withValues(alpha: 0.14)
-                        : ReviewTheme.danger.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        question.isCorrect
-                            ? Icons.check_circle_rounded
-                            : Icons.cancel_rounded,
-                        color: question.isCorrect
-                            ? ReviewTheme.success
-                            : ReviewTheme.danger,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        question.isCorrect ? 'Correct' : 'Wrong',
-                        style: TextStyle(
-                          color: question.isCorrect
-                              ? ReviewTheme.success
-                              : ReviewTheme.danger,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // Question text — EDUCATIONAL CONTENT, gets AbhayaLibre
-            Text(
-              question.questionText,
-              style: const TextStyle(
-                fontFamily: ReviewTheme.contentFont,
-                color: ReviewTheme.textDark,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                height: 1.6,
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Options
-            ...List.generate(question.options.length, (index) {
-              final option = question.options[index];
-              final isSelected = question.selectedOptionId == option.id;
-              final isCorrect = question.correctOptionId == option.id;
-
-              Color bgColor = Colors.white.withValues(alpha: 0.03);
-              Color borderColor = ReviewTheme.divider;
-              IconData? trailingIcon;
-              Color? trailingColor;
-
-              if (isCorrect) {
-                bgColor = ReviewTheme.success.withValues(alpha: 0.12);
-                borderColor = ReviewTheme.success;
-                trailingIcon = Icons.check_circle_rounded;
-                trailingColor = ReviewTheme.success;
-              } else if (isSelected && !isCorrect) {
-                bgColor = ReviewTheme.danger.withValues(alpha: 0.12);
-                borderColor = ReviewTheme.danger;
-                trailingIcon = Icons.cancel_rounded;
-                trailingColor = ReviewTheme.danger;
-              }
-
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
-                  ),
-                  decoration: BoxDecoration(
-                    color: bgColor,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: borderColor,
-                      width: (isCorrect || (isSelected && !isCorrect))
-                          ? 2
-                          : 1.2,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      // Label — UI chrome (A/B/C/D chip), stays Poppins
-                      Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: isCorrect
-                              ? ReviewTheme.success
-                              : isSelected && !isCorrect
-                              ? ReviewTheme.danger
-                              : Colors.white.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Center(
-                          child: Text(
-                            option.optionKey,
-                            style: TextStyle(
-                              color: isCorrect || (isSelected && !isCorrect)
-                                  ? Colors.white
-                                  : ReviewTheme.textMid,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      // Option text — EDUCATIONAL CONTENT, gets AbhayaLibre
-                      Expanded(
-                        child: Text(
-                          option.optionText,
-                          style: TextStyle(
-                            fontFamily: ReviewTheme.contentFont,
-                            color: isCorrect
-                                ? ReviewTheme.success
-                                : isSelected && !isCorrect
-                                ? ReviewTheme.danger
-                                : ReviewTheme.textDark,
-                            fontSize: 14,
-                            fontWeight: isCorrect || (isSelected && !isCorrect)
-                                ? FontWeight.w600
-                                : FontWeight.w400,
-                            height: 1.4,
-                          ),
-                        ),
-                      ),
-                      // Status icon
-                      if (trailingIcon != null)
-                        Icon(trailingIcon, color: trailingColor, size: 20),
-                      const SizedBox(width: 4),
-                      // Labels — UI chrome, stays Poppins
-                      if (isCorrect)
-                        const Text(
-                          'Correct Answer',
-                          style: TextStyle(
-                            color: ReviewTheme.success,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      if (isSelected && !isCorrect)
-                        const Text(
-                          'Your Answer',
-                          style: TextStyle(
-                            color: ReviewTheme.danger,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              );
-            }),
-
-            // Explanation
-            if (question.explanation != null &&
-                question.explanation!.isNotEmpty) ...[
-              const SizedBox(height: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header row: number + status badge
+          Row(
+            children: [
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
-                  color: ReviewTheme.explanationBg,
+                  color: ReviewTheme.surfaceMuted,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Q$questionNumber',
+                  style: const TextStyle(
+                    color: ReviewTheme.textSecondary,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _StatusBadge(isCorrect: question.isCorrect),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Question text (content font)
+          Text(
+            question.questionText,
+            style: const TextStyle(
+              fontFamily: ReviewTheme.contentFont,
+              color: ReviewTheme.textPrimary,
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              height: 1.55,
+              letterSpacing: 0.1,
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          // Options
+          ...List.generate(question.options.length, (index) {
+            final option = question.options[index];
+            final isSelected = question.selectedOptionId == option.id;
+            final isCorrect = question.correctOptionId == option.id;
+
+            // Default (neutral) styling
+            Color bg = ReviewTheme.surface;
+            Color borderColor = ReviewTheme.border;
+            Color keyBg = ReviewTheme.surfaceMuted;
+            Color keyFg = ReviewTheme.textSecondary;
+            Color textColor = ReviewTheme.textSecondary;
+            IconData? trailingIcon;
+            Color? trailingColor;
+
+            if (isCorrect) {
+              bg = ReviewTheme.successSoft;
+              borderColor = ReviewTheme.success;
+              keyBg = ReviewTheme.success;
+              keyFg = Colors.white;
+              textColor = ReviewTheme.success;
+              trailingIcon = Icons.check_circle_rounded;
+              trailingColor = ReviewTheme.success;
+            } else if (isSelected && !isCorrect) {
+              bg = ReviewTheme.dangerSoft;
+              borderColor = ReviewTheme.danger;
+              keyBg = ReviewTheme.danger;
+              keyFg = Colors.white;
+              textColor = ReviewTheme.danger;
+              trailingIcon = Icons.cancel_rounded;
+              trailingColor = ReviewTheme.danger;
+            }
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 13,
+                ),
+                decoration: BoxDecoration(
+                  color: bg,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: ReviewTheme.explanationBorder),
+                  border: Border.all(
+                    color: borderColor,
+                    width: (isCorrect || (isSelected && !isCorrect))
+                        ? 1.6
+                        : 1.2,
+                  ),
                 ),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(
-                      Icons.lightbulb_outline_rounded,
-                      color: ReviewTheme.explanationAccent,
-                      size: 20,
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: keyBg,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Center(
+                        child: Text(
+                          option.optionKey,
+                          style: TextStyle(
+                            color: keyFg,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // "Explanation" label — UI chrome, stays Poppins
-                          const Text(
-                            'Explanation',
-                            style: TextStyle(
-                              color: ReviewTheme.explanationAccent,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          // Explanation body — EDUCATIONAL CONTENT,
-                          // gets AbhayaLibre
-                          Text(
-                            question.explanation!,
-                            style: const TextStyle(
-                              fontFamily: ReviewTheme.contentFont,
-                              color: ReviewTheme.explanationText,
-                              fontSize: 14,
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
+                      child: Text(
+                        option.optionText,
+                        style: TextStyle(
+                          fontFamily: ReviewTheme.contentFont,
+                          color: textColor,
+                          fontSize: 15.5,
+                          fontWeight: isCorrect || (isSelected && !isCorrect)
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          height: 1.4,
+                          letterSpacing: 0.1,
+                        ),
                       ),
                     ),
+                    if (trailingIcon != null) ...[
+                      const SizedBox(width: 8),
+                      Icon(trailingIcon, color: trailingColor, size: 20),
+                    ],
                   ],
                 ),
               ),
-            ],
+            );
+          }),
+
+          // Status labels below options for clarity
+          if (question.selectedOptionId == null) ...[
+            const SizedBox(height: 2),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: ReviewTheme.surfaceMuted,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: ReviewTheme.border),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.flag_outlined,
+                    size: 14,
+                    color: ReviewTheme.textMuted,
+                  ),
+                  SizedBox(width: 6),
+                  Text(
+                    'Not answered',
+                    style: TextStyle(
+                      color: ReviewTheme.textMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
-        ),
+
+          // Explanation
+          if (question.explanation != null &&
+              question.explanation!.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: ReviewTheme.explanationBg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: ReviewTheme.explanationBorder),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 26,
+                    height: 26,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: ReviewTheme.explanationAccent.withValues(
+                        alpha: 0.12,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.lightbulb_outline_rounded,
+                      color: ReviewTheme.explanationAccent,
+                      size: 15,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Explanation',
+                          style: TextStyle(
+                            color: ReviewTheme.explanationAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          question.explanation!,
+                          style: const TextStyle(
+                            fontFamily: ReviewTheme.contentFont,
+                            color: ReviewTheme.explanationText,
+                            fontSize: 14.5,
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
 }
 
-// ------------------------------------------------------------
-// 6.6 Bottom Navigation — UI chrome, stays Poppins
-// ------------------------------------------------------------
-class _BottomNav extends StatelessWidget {
-  final int currentIndex;
-  final int totalQuestions;
-  final VoidCallback onPrevious;
-  final VoidCallback onNext;
+class _StatusBadge extends StatelessWidget {
+  final bool isCorrect;
 
-  const _BottomNav({
-    required this.currentIndex,
-    required this.totalQuestions,
-    required this.onPrevious,
-    required this.onNext,
-  });
+  const _StatusBadge({required this.isCorrect});
 
   @override
   Widget build(BuildContext context) {
-    final isFirst = currentIndex == 0;
-    final isLast = currentIndex == totalQuestions - 1;
+    final color = isCorrect ? ReviewTheme.success : ReviewTheme.danger;
+    final bg = isCorrect ? ReviewTheme.successSoft : ReviewTheme.dangerSoft;
+    final border = isCorrect
+        ? ReviewTheme.successBorder
+        : ReviewTheme.dangerBorder;
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: ReviewTheme.card.withValues(alpha: 0.92),
-        border: Border(top: BorderSide(color: ReviewTheme.divider, width: 1)),
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: border),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Previous Button
-          OutlinedButton(
-            onPressed: isFirst ? null : onPrevious,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: ReviewTheme.primary,
-              disabledForegroundColor: ReviewTheme.textLight,
-              side: BorderSide(
-                color: isFirst ? ReviewTheme.divider : ReviewTheme.primary,
-                width: 1.5,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.arrow_back_rounded, size: 18),
-                SizedBox(width: 4),
-                Text(
-                  'Previous',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
+          Icon(
+            isCorrect ? Icons.check_circle_rounded : Icons.cancel_rounded,
+            color: color,
+            size: 13,
           ),
-          const SizedBox(width: 12),
-
-          // Next / Done Button
-          Expanded(
-            child: isLast
-                ? ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: ReviewTheme.primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'Done',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        SizedBox(width: 4),
-                        Icon(Icons.check_rounded, size: 18),
-                      ],
-                    ),
-                  )
-                : ElevatedButton(
-                    onPressed: onNext,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: ReviewTheme.primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'Next',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        SizedBox(width: 4),
-                        Icon(Icons.arrow_forward_rounded, size: 18),
-                      ],
-                    ),
-                  ),
+          const SizedBox(width: 4),
+          Text(
+            isCorrect ? 'Correct' : 'Wrong',
+            style: TextStyle(
+              color: color,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.2,
+            ),
           ),
         ],
       ),

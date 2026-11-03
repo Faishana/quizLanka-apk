@@ -1,30 +1,36 @@
 // subjects_screen.dart
 // ============================================================
-// PREMIUM REDESIGN — same data flow, same background asset,
-// upgraded visual language: refined typography, soft glass
-// surfaces, layered shadows, gradient accents, subtle motion.
+// PREMIUM SUBJECTS SCREEN — aligned with StudentSubjectController
+//
+// Backend contract (GET /api/subjects):
+//  200 { success:true,  grade:{id,name}, al_stream, subjects:[...] }
+//  200 { success:true,  subjects:[], message:"Please select your grade first." }
+//  401 { success:false, message, subjects:[] }
+//  422 { success:false, message:"Please select a valid A/L stream." }
+//  500 { success:false, message:"Failed to load subjects." }
+//
+// Each subject: { id, name, slug, icon|null, color, questions_count, description }
 // ============================================================
-// 1. IMPORTS
-// ============================================================
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:quiz_lanka/Login.dart';
 import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/difficulty_screen.dart';
+import 'package:quiz_lanka/Login.dart';
 
 // ============================================================
-// 2. MODELS — UNCHANGED (do not modify)
+// 1. MODELS
 // ============================================================
 
 class Subject {
   final int id;
   final String name;
-  final String? icon; // full network URL (asset('storage/...'))
+  final String? slug;
+  final String? icon; // full network URL or null
   final String color;
   final int? questionsCount;
   final String? description;
@@ -32,38 +38,66 @@ class Subject {
   Subject({
     required this.id,
     required this.name,
+    this.slug,
     this.icon,
     required this.color,
     this.questionsCount,
     this.description,
   });
 
+  /// Robust parsing — backend sends `questions_count` as int,
+  /// but we accept string too in case of count() serialization.
   factory Subject.fromJson(Map<String, dynamic> json) {
-    debugPrint("Subject: ${json['name']}");
-    debugPrint("Icon: ${json['icon']}");
-
     return Subject(
-      id: json['id'] as int,
-      name: json['name'] as String,
-      icon: json['icon'] as String?,
-      color: json['color'] as String,
-      questionsCount: json['questions_count'] as int?,
-      description: json['description'] as String?,
+      id: _asInt(json['id'], fallback: 0),
+      name: (json['name'] as String?) ?? 'Unknown Subject',
+      slug: _asNullableString(json['slug']),
+      icon: _asNullableString(json['icon']),
+      color: _asNullableString(json['color']) ?? '#4E3AE8',
+      questionsCount: json['questions_count'] == null
+          ? null
+          : _asInt(json['questions_count'], fallback: 0),
+      description: _asNullableString(json['description']),
     );
   }
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
+    'slug': slug,
     'icon': icon,
     'color': color,
     'questions_count': questionsCount,
     'description': description,
   };
 
+  static int _asInt(dynamic v, {int fallback = 0}) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v) ?? fallback;
+    return fallback;
+  }
+
+  static String? _asNullableString(dynamic v) {
+    if (v == null) return null;
+    if (v is String) return v.isEmpty ? null : v;
+    return v.toString();
+  }
+
+  /// Supports `#RRGGBB`, `RRGGBB`, `#RGB`, `RGB`, `AARRGGBB`.
   Color get flutterColor {
     try {
-      final hex = color.replaceAll('#', '');
+      final cleaned = color.replaceAll('#', '').trim();
+      String hex;
+      if (cleaned.length == 3) {
+        hex = cleaned.split('').map((c) => '$c$c').join();
+      } else if (cleaned.length == 6) {
+        hex = cleaned;
+      } else if (cleaned.length == 8) {
+        return Color(int.parse(cleaned, radix: 16));
+      } else {
+        return const Color(0xFF4E3AE8);
+      }
       return Color(int.parse('FF$hex', radix: 16));
     } catch (_) {
       return const Color(0xFF4E3AE8);
@@ -71,18 +105,42 @@ class Subject {
   }
 }
 
+/// Result of GET /api/subjects — distinguishes empty-state causes.
+class SubjectsResult {
+  final List<Subject> subjects;
+  final int? gradeId;
+  final String? gradeName;
+  final String? alStream;
+  final String? message; // backend-provided hint when empty
+  final bool success;
+
+  SubjectsResult({
+    required this.subjects,
+    this.gradeId,
+    this.gradeName,
+    this.alStream,
+    this.message,
+    required this.success,
+  });
+
+  bool get hasGrade => gradeId != null;
+}
+
 // ============================================================
-// 3. SUBJECT SERVICE — UNCHANGED (do not modify)
+// 2. SUBJECT SERVICE
 // ============================================================
 
 class SubjectService {
   final http.Client _client = http.Client();
 
-  Future<List<Subject>> getSubjects() async {
+  /// Fetches subjects. Throws [Exception] only on auth / server /
+  /// network failures. An empty (but successful) response is a
+  /// valid result so the UI can show the correct empty-state.
+  Future<SubjectsResult> getSubjects() async {
     final token = await TokenStorage.getToken();
 
     if (token == null || token.isEmpty) {
-      throw Exception('Authentication token not found.');
+      throw Exception('Authentication token not found. Please login again.');
     }
 
     http.Response response;
@@ -104,58 +162,80 @@ class SubjectService {
       throw Exception('Invalid server response. Please try again.');
     }
 
-    Map<String, dynamic> data;
+    debugPrint('Subjects API ${response.statusCode}: ${response.body}');
 
+    // Parse body once, tolerate empty body.
+    Map<String, dynamic> data;
     try {
-      data = jsonDecode(response.body) as Map<String, dynamic>;
+      final decoded = response.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(response.body);
+      data = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
     } on FormatException {
       throw Exception('Received an invalid response from the server.');
     }
 
-    debugPrint('Subjects API Status: ${response.statusCode}');
-    debugPrint('Subjects API Response: ${response.body}');
+    final serverMessage = data['message'] as String?;
 
-    /*
-  |--------------------------------------------------------------------------
-  | SUCCESS
-  |--------------------------------------------------------------------------
-  */
-
+    // ---- 200: success (may be empty but valid) ----
     if (response.statusCode == 200 && data['success'] == true) {
-      final subjectsList = data['subjects'];
-
-      if (subjectsList == null || subjectsList is! List) {
+      final rawList = data['subjects'];
+      if (rawList != null && rawList is! List) {
         throw Exception('Invalid subjects data received from server.');
       }
 
-      return subjectsList
-          .map((e) => Subject.fromJson(e as Map<String, dynamic>))
+      final subjects = (rawList as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(Subject.fromJson)
           .toList();
+
+      int? gradeId;
+      String? gradeName;
+      final grade = data['grade'];
+      if (grade is Map<String, dynamic>) {
+        final id = grade['id'];
+        if (id is int) gradeId = id;
+        if (id is String) gradeId = int.tryParse(id);
+        gradeName = grade['name'] as String?;
+      }
+
+      final alStream = data['al_stream'] as String?;
+
+      return SubjectsResult(
+        subjects: subjects,
+        gradeId: gradeId,
+        gradeName: gradeName,
+        alStream: (alStream != null && alStream.isNotEmpty) ? alStream : null,
+        message: serverMessage,
+        success: true,
+      );
     }
 
-    /*
-  |--------------------------------------------------------------------------
-  | UNAUTHORIZED
-  |--------------------------------------------------------------------------
-  */
-
+    // ---- 401: unauthorized ----
     if (response.statusCode == 401) {
       await TokenStorage.clearAll();
-
-      throw Exception('Session expired. Please login again.');
+      throw Exception(serverMessage ?? 'Session expired. Please login again.');
     }
 
-    /*
-  |--------------------------------------------------------------------------
-  | SERVER ERROR
-  |--------------------------------------------------------------------------
-  */
+    // ---- 403: forbidden (no grade / not configured) ----
+    if (response.statusCode == 403) {
+      throw Exception(
+        serverMessage ?? 'You do not have access to these subjects.',
+      );
+    }
 
+    // ---- 422: invalid A/L stream ----
+    if (response.statusCode == 422) {
+      throw Exception(serverMessage ?? 'Please select a valid A/L stream.');
+    }
+
+    // ---- 5xx ----
     if (response.statusCode >= 500) {
-      throw Exception('Server error. Please try again later.');
+      throw Exception(serverMessage ?? 'Server error. Please try again later.');
     }
 
-    throw Exception(data['message'] ?? 'Failed to load subjects.');
+    // ---- other 4xx ----
+    throw Exception(serverMessage ?? 'Failed to load subjects.');
   }
 
   void dispose() {
@@ -164,9 +244,7 @@ class SubjectService {
 }
 
 // ============================================================
-// 4. DESIGN TOKENS — premium palette: deep ink text, richer
-// violet/indigo gradient, softer glass-white surfaces, more
-// deliberate elevation and spacing.
+// 3. DESIGN TOKENS
 // ============================================================
 
 class _Palette {
@@ -182,7 +260,6 @@ class _Palette {
     Color(0xFF2563EB),
   ];
 
-  // Same background asset as before.
   static const String backgroundAsset = 'assets/sub_bg.png';
 
   static const List<Color> pageGradientFallback = [
@@ -218,12 +295,7 @@ class _Palette {
 }
 
 // ============================================================
-// 5. SUBJECTS SCREEN
-// ------------------------------------------------------------
-// FutureBuilder, state management and navigation
-// (_openDifficultyScreen → DifficultyScreen) are unchanged — a
-// single tap on any subject card still goes straight to the
-// difficulty screen for that subject.
+// 4. SUBJECTS SCREEN
 // ============================================================
 
 class SubjectsScreen extends StatefulWidget {
@@ -236,7 +308,7 @@ class SubjectsScreen extends StatefulWidget {
 class _SubjectsScreenState extends State<SubjectsScreen>
     with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   final SubjectService _service = SubjectService();
-  late Future<List<Subject>> _subjectsFuture;
+  late Future<SubjectsResult> _subjectsFuture;
   late final AnimationController _entryController;
 
   bool _searchOpen = false;
@@ -261,6 +333,10 @@ class _SubjectsScreenState extends State<SubjectsScreen>
 
   void _refresh() {
     setState(() {
+      _query = '';
+      _entryController
+        ..reset()
+        ..forward();
       _subjectsFuture = _service.getSubjects();
     });
   }
@@ -310,7 +386,6 @@ class _SubjectsScreenState extends State<SubjectsScreen>
       backgroundColor: const Color(0xFFF9F9FD),
       body: Stack(
         children: [
-          // Same background artwork asset, unchanged path.
           Positioned.fill(
             child: Image.asset(
               _Palette.backgroundAsset,
@@ -359,7 +434,7 @@ class _SubjectsScreenState extends State<SubjectsScreen>
                   secondChild: const SizedBox(width: double.infinity),
                 ),
                 Expanded(
-                  child: FutureBuilder<List<Subject>>(
+                  child: FutureBuilder<SubjectsResult>(
                     future: _subjectsFuture,
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
@@ -373,10 +448,10 @@ class _SubjectsScreenState extends State<SubjectsScreen>
                         );
                       }
 
-                      final allSubjects = snapshot.data!;
+                      final result = snapshot.data;
+                      final allSubjects = result?.subjects ?? const <Subject>[];
                       final subjects = _applyFilter(allSubjects);
 
-                      // Calculate total quizzes from all subjects
                       final totalQuizzes = allSubjects.fold<int>(
                         0,
                         (sum, s) => sum + (s.questionsCount ?? 0),
@@ -398,9 +473,17 @@ class _SubjectsScreenState extends State<SubjectsScreen>
                                 ),
                               ),
                             if (allSubjects.isEmpty)
-                              const SliverFillRemaining(child: _EmptyView())
+                              SliverFillRemaining(
+                                hasScrollBody: false,
+                                child: _EmptyView(
+                                  message: result?.message,
+                                  hasGrade: result?.hasGrade ?? false,
+                                  gradeName: result?.gradeName,
+                                ),
+                              )
                             else if (subjects.isEmpty)
                               SliverFillRemaining(
+                                hasScrollBody: false,
                                 child: _NoResultsView(query: _query),
                               )
                             else ...[
@@ -463,12 +546,9 @@ class _SubjectsScreenState extends State<SubjectsScreen>
 }
 
 // ============================================================
-// 6. WIDGETS
+// 5. WIDGETS
 // ============================================================
 
-// ------------------------------------------------------------
-// 6.1 Top Bar — glass surface buttons, tighter premium type.
-// ------------------------------------------------------------
 class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.onBack,
@@ -611,9 +691,6 @@ class _CircleIconButton extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.2 Search field
-// ------------------------------------------------------------
 class _SearchField extends StatelessWidget {
   const _SearchField({required this.onChanged});
   final ValueChanged<String> onChanged;
@@ -646,10 +723,6 @@ class _SearchField extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.3 Hero stats banner — premium gradient card with only
-// Subjects and Total Quizzes (Ready Now removed)
-// ------------------------------------------------------------
 class _HeroStatsBanner extends StatelessWidget {
   const _HeroStatsBanner({
     required this.subjectCount,
@@ -730,7 +803,7 @@ class _HeroStatsBanner extends StatelessWidget {
                         icon: Icons.menu_book_rounded,
                       ),
                     ),
-                    _HeroDivider(),
+                    const _HeroDivider(),
                     Expanded(
                       child: _HeroStat(
                         value: '$totalQuizzes',
@@ -805,9 +878,6 @@ class _HeroStat extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.3b Section label above the grid.
-// ------------------------------------------------------------
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel({required this.count});
   final int count;
@@ -846,9 +916,6 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.4 Loading View
-// ------------------------------------------------------------
 class _LoadingView extends StatelessWidget {
   const _LoadingView();
 
@@ -893,9 +960,6 @@ class _LoadingView extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.5 Error View
-// ------------------------------------------------------------
 class _ErrorView extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
@@ -966,7 +1030,7 @@ class _ErrorView extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.refresh_rounded, size: 18, color: Colors.white),
-                    const SizedBox(width: 8),
+                    SizedBox(width: 8),
                     Text(
                       'Retry',
                       style: TextStyle(
@@ -986,55 +1050,75 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.6 Empty View
-// ------------------------------------------------------------
+/// Empty-state that adapts to *why* the list is empty:
+///   • No grade selected (backend `message` present, no grade object)
+///   • Grade configured but no subjects → generic "no subjects" copy.
 class _EmptyView extends StatelessWidget {
-  const _EmptyView();
+  const _EmptyView({this.message, this.hasGrade = false, this.gradeName});
+
+  final String? message;
+  final bool hasGrade;
+  final String? gradeName;
 
   @override
   Widget build(BuildContext context) {
+    final bool noGrade = !hasGrade && (message != null && message!.isNotEmpty);
+    final String title = noGrade
+        ? 'Set up your grade'
+        : 'No subjects available';
+    final String subtitle = noGrade
+        ? (message ?? 'Please select your grade first.')
+        : (gradeName != null
+              ? 'No active subjects for $gradeName yet.'
+              : 'Subjects for your grade will appear here.');
+
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 84,
-            height: 84,
-            decoration: BoxDecoration(
-              color: _Palette.violet.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(26),
-              border: Border.all(color: _Palette.border),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 84,
+              height: 84,
+              decoration: BoxDecoration(
+                color: _Palette.violet.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: _Palette.border),
+              ),
+              child: Icon(
+                noGrade ? Icons.school_outlined : Icons.menu_book_outlined,
+                size: 40,
+                color: _Palette.violet,
+              ),
             ),
-            child: const Icon(
-              Icons.menu_book_outlined,
-              size: 40,
-              color: _Palette.violet,
+            const SizedBox(height: 18),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: _Palette.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-          ),
-          const SizedBox(height: 18),
-          const Text(
-            'No subjects available',
-            style: TextStyle(
-              color: _Palette.textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: _Palette.textSecondary,
+                fontSize: 14,
+                height: 1.45,
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Subjects for your grade will appear here',
-            style: TextStyle(color: _Palette.textSecondary, fontSize: 14),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-// ------------------------------------------------------------
-// 6.7 No Results View
-// ------------------------------------------------------------
 class _NoResultsView extends StatelessWidget {
   const _NoResultsView({required this.query});
   final String query;
@@ -1075,9 +1159,6 @@ class _NoResultsView extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.8 Footer note
-// ------------------------------------------------------------
 class _FooterNote extends StatelessWidget {
   const _FooterNote();
 
@@ -1114,12 +1195,6 @@ class _FooterNote extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.9 Subject Icon — same network image behaviour, refined
-// container proportions and a subtle inner glow for a premium
-// feel. Public (not prefixed with _) so difficulty_screen.dart
-// can reuse it there too.
-// ------------------------------------------------------------
 class SubjectIcon extends StatelessWidget {
   final Subject subject;
   final Color color;
@@ -1151,6 +1226,10 @@ class SubjectIcon extends StatelessWidget {
     if (name.contains('chem')) return Icons.science_rounded;
     if (name.contains('geo')) return Icons.public_outlined;
     if (name.contains('art')) return Icons.palette_outlined;
+    if (name.contains('qa') || name.contains('aptitude')) {
+      return Icons.psychology_outlined;
+    }
+    if (name.contains('language')) return Icons.translate_rounded;
     return Icons.school_outlined;
   }
 
@@ -1189,10 +1268,8 @@ class SubjectIcon extends StatelessWidget {
                 headers: const {"Accept": "image/*"},
                 frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
                   if (wasSynchronouslyLoaded || frame != null) {
-                    debugPrint("✅ Image Loaded: ${subject.icon}");
                     return child;
                   }
-
                   return Center(
                     child: SizedBox(
                       width: size * 0.3,
@@ -1205,9 +1282,8 @@ class SubjectIcon extends StatelessWidget {
                   );
                 },
                 errorBuilder: (context, error, stackTrace) {
-                  debugPrint("❌ Image Error: $error");
+                  debugPrint("❌ Subject icon failed: $error");
                   debugPrint("❌ URL: ${subject.icon}");
-
                   return Icon(
                     _fallbackIcon(),
                     color: iconColor,
@@ -1221,14 +1297,6 @@ class SubjectIcon extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// 6.10 Subject Tile — premium card: staggered fade/slide entry,
-// gradient icon backdrop, refined type scale, tactile tap scale,
-// and a soft colored glow keyed to the subject's own color.
-// Layout still icon → name → quiz-count line only, no fabricated
-// progress/XP/rank data.
-// "Coming soon" removed — always shows question count
-// ------------------------------------------------------------
 class _SubjectTile extends StatefulWidget {
   final Subject subject;
   final int index;
@@ -1322,7 +1390,7 @@ class _SubjectTileState extends State<_SubjectTile> {
                   subject.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: _Palette.textPrimary,
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
