@@ -1,49 +1,45 @@
 // quiz_screen.dart
 // Light theme redesign — clean, modern, high-contrast UI.
+// + Live quiz timer (Stopwatch + Timer.periodic)
 // ============================================================
 // 1. IMPORTS
 // ============================================================
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:quiz_lanka/Login.dart';
 import 'package:quiz_lanka/config/api_config.dart';
-import 'package:quiz_lanka/config/appTheam.dart';
 import 'package:quiz_lanka/quiz_result_screen.dart';
 
 // ============================================================
 // 2. LIGHT THEME TOKENS
 // ============================================================
 class QuizTheme {
-  // Surfaces
   static const Color background = Color(0xFFF7F8FC);
   static const Color surface = Colors.white;
   static const Color surfaceMuted = Color(0xFFF1F3F9);
   static const Color border = Color(0xFFE4E7F0);
   static const Color borderStrong = Color(0xFFCBD1E0);
 
-  // Text
   static const Color textPrimary = Color(0xFF1A1D2B);
   static const Color textSecondary = Color(0xFF5A6072);
   static const Color textMuted = Color(0xFF8A90A2);
 
-  // States
   static const Color success = Color(0xFF16A34A);
   static const Color successSoft = Color(0xFFE7F7EE);
   static const Color danger = Color(0xFFDC2626);
   static const Color dangerSoft = Color(0xFFFDECEC);
   static const Color warning = Color(0xFFF59E0B);
 
-  // Accent (overridden at runtime by subjectColor where relevant)
   static const Color accent = Color(0xFF6C4DFF);
   static const Color accentSoft = Color(0xFFEFEBFF);
 
-  // Content font — applies ONLY to question & option text
   static const String contentFont = 'AbhayaLibre';
 }
 
 // ============================================================
-// 3. MODELS (unchanged)
+// 3. MODELS
 // ============================================================
 class QuizOption {
   final int id;
@@ -120,6 +116,12 @@ class _QuizScreenState extends State<QuizScreen> {
   final Map<int, int> _answers = {};
   bool _submitting = false;
 
+  // ── Timer state ──────────────────────────────────────────
+  final Stopwatch _stopwatch = Stopwatch();
+  Timer? _timer;
+  String _formattedTime = '00:00';
+  int _durationSeconds = 0;
+
   QuizQuestion get _currentQuestion => widget.questions[_currentIndex];
   bool get _isFirst => _currentIndex == 0;
   bool get _isLast => _currentIndex == widget.questions.length - 1;
@@ -129,6 +131,62 @@ class _QuizScreenState extends State<QuizScreen> {
       ? 0.0
       : (_currentIndex + 1) / widget.questions.length;
 
+  // ── Lifecycle ────────────────────────────────────────────
+  @override
+  void initState() {
+    super.initState();
+    // Start the live timer as soon as the quiz screen is ready.
+    // The backend already recorded `started_at` when /quiz/start was called,
+    // so this stopwatch is purely for the live UI display.
+    _startQuizTimer();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _stopwatch.stop();
+    super.dispose();
+  }
+
+  // ── Timer helpers ────────────────────────────────────────
+  void _startQuizTimer() {
+    if (_stopwatch.isRunning) {
+      // Resume from where we paused (used after a failed submit).
+      _timer?.cancel();
+    } else {
+      _stopwatch.start();
+    }
+
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        _durationSeconds = _stopwatch.elapsed.inSeconds;
+        _formattedTime = _formatDuration(_durationSeconds);
+      });
+    });
+  }
+
+  void _stopQuizTimer() {
+    _stopwatch.stop();
+    _timer?.cancel();
+  }
+
+  String _formatDuration(int seconds) {
+    final hours = seconds ~/ 3600;
+    final minutes = (seconds % 3600) ~/ 60;
+    final remainingSeconds = seconds % 60;
+
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}:'
+          '${minutes.toString().padLeft(2, '0')}:'
+          '${remainingSeconds.toString().padLeft(2, '0')}';
+    }
+    return '${minutes.toString().padLeft(2, '0')}:'
+        '${remainingSeconds.toString().padLeft(2, '0')}';
+  }
+
+  // ── Answer / navigation ──────────────────────────────────
   void _selectOption(int optionIndex) {
     setState(() {
       _answers[_currentQuestion.id] = optionIndex;
@@ -169,6 +227,7 @@ class _QuizScreenState extends State<QuizScreen> {
     );
   }
 
+  // ── Submit ───────────────────────────────────────────────
   Future<void> _submitQuiz() async {
     if (_unansweredCount > 0) {
       final confirm = await showDialog<bool>(
@@ -260,6 +319,8 @@ class _QuizScreenState extends State<QuizScreen> {
       if (confirm != true) return;
     }
 
+    // Stop the live timer BEFORE sending the request.
+    _stopQuizTimer();
     setState(() => _submitting = true);
 
     try {
@@ -291,6 +352,12 @@ class _QuizScreenState extends State<QuizScreen> {
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
+
+        // The backend is the source of truth — use its duration.
+        final durationSeconds =
+            (json['duration_seconds'] as num?)?.toInt() ??
+            _stopwatch.elapsed.inSeconds;
+
         if (!mounted) return;
         Navigator.pushReplacement(
           context,
@@ -300,6 +367,7 @@ class _QuizScreenState extends State<QuizScreen> {
               resultData: json,
               subjectName: widget.subjectName,
               subjectColor: widget.subjectColor,
+              durationSeconds: durationSeconds,
             ),
           ),
         );
@@ -311,6 +379,9 @@ class _QuizScreenState extends State<QuizScreen> {
         throw Exception(body['message'] ?? 'Failed to submit quiz.');
       }
     } catch (e) {
+      // Submission failed — resume the timer so the user's time is intact.
+      _startQuizTimer();
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -486,7 +557,7 @@ class _QuizScreenState extends State<QuizScreen> {
   }
 
   // ============================================================
-  // TOP BAR
+  // TOP BAR (with timer chip)
   // ============================================================
   Widget _buildTopBar() {
     return Padding(
@@ -523,6 +594,41 @@ class _QuizScreenState extends State<QuizScreen> {
               ],
             ),
           ),
+
+          // ── Live timer chip ─────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2563EB).withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFF2563EB).withValues(alpha: 0.25),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.timer_outlined,
+                  color: Color(0xFF2563EB),
+                  size: 15,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  _formattedTime,
+                  style: const TextStyle(
+                    color: Color(0xFF2563EB),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12.5,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Answered count chip
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
@@ -602,7 +708,7 @@ class _QuizScreenState extends State<QuizScreen> {
   }
 
   // ============================================================
-  // QUESTION CARD — clean white card with accent side bar
+  // QUESTION CARD
   // ============================================================
   Widget _buildQuestionCard() {
     return Container(
@@ -623,7 +729,6 @@ class _QuizScreenState extends State<QuizScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Accent side bar
             Container(
               width: 5,
               decoration: BoxDecoration(
@@ -639,7 +744,6 @@ class _QuizScreenState extends State<QuizScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Small label chip
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
@@ -660,7 +764,6 @@ class _QuizScreenState extends State<QuizScreen> {
                       ),
                     ),
                     const SizedBox(height: 14),
-                    // Question text
                     Text(
                       _currentQuestion.questionText,
                       style: const TextStyle(
@@ -732,9 +835,6 @@ class _QuizScreenState extends State<QuizScreen> {
     );
   }
 
-  // ============================================================
-  // SKIP BUTTON
-  // ============================================================
   Widget _buildSkipButton() {
     return Center(
       child: TextButton.icon(
@@ -771,7 +871,6 @@ class _QuizScreenState extends State<QuizScreen> {
       ),
       child: Row(
         children: [
-          // Navigator button
           GestureDetector(
             onTap: _showQuestionNavigator,
             child: Container(
@@ -821,8 +920,6 @@ class _QuizScreenState extends State<QuizScreen> {
             ),
           ),
           const SizedBox(width: 10),
-
-          // Previous
           SizedBox(
             height: 48,
             child: OutlinedButton(
@@ -843,8 +940,6 @@ class _QuizScreenState extends State<QuizScreen> {
             ),
           ),
           const SizedBox(width: 10),
-
-          // Next / Submit
           Expanded(
             child: SizedBox(
               height: 48,
@@ -978,7 +1073,7 @@ class _LightDialog extends StatelessWidget {
 }
 
 // ============================================================
-// 6. OPTION CARD (light)
+// 6. OPTION CARD
 // ============================================================
 class _OptionCard extends StatelessWidget {
   final String label;
@@ -1029,7 +1124,6 @@ class _OptionCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Radio indicator
             AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               width: 22,
@@ -1051,7 +1145,6 @@ class _OptionCard extends StatelessWidget {
                   : null,
             ),
             const SizedBox(width: 14),
-            // A/B/C/D chip
             Container(
               width: 30,
               height: 30,
@@ -1073,7 +1166,6 @@ class _OptionCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            // Option text
             Expanded(
               child: Text(
                 text,
@@ -1097,7 +1189,7 @@ class _OptionCard extends StatelessWidget {
 }
 
 // ============================================================
-// 7. QUESTION NAVIGATOR (light)
+// 7. QUESTION NAVIGATOR
 // ============================================================
 class _QuestionNavigator extends StatelessWidget {
   final int totalQuestions;
@@ -1135,7 +1227,6 @@ class _QuestionNavigator extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Drag handle
           Center(
             child: Container(
               width: 40,
@@ -1189,8 +1280,6 @@ class _QuestionNavigator extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-
-          // Legend
           Container(
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
             decoration: BoxDecoration(
@@ -1208,8 +1297,6 @@ class _QuestionNavigator extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-
-          // Grid
           Expanded(
             child: GridView.builder(
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -1267,7 +1354,6 @@ class _QuestionNavigator extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-
           SizedBox(
             width: double.infinity,
             height: 48,
@@ -1319,7 +1405,7 @@ class _QuestionNavigator extends StatelessWidget {
 }
 
 // ============================================================
-// 8. SHARED — Circle Icon Button (light)
+// 8. CIRCLE ICON BUTTON
 // ============================================================
 class _CircleIconButton extends StatelessWidget {
   final IconData icon;

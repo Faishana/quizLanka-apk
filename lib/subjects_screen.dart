@@ -45,8 +45,6 @@ class Subject {
     this.description,
   });
 
-  /// Robust parsing — backend sends `questions_count` as int,
-  /// but we accept string too in case of count() serialization.
   factory Subject.fromJson(Map<String, dynamic> json) {
     return Subject(
       id: _asInt(json['id'], fallback: 0),
@@ -84,7 +82,6 @@ class Subject {
     return v.toString();
   }
 
-  /// Supports `#RRGGBB`, `RRGGBB`, `#RGB`, `RGB`, `AARRGGBB`.
   Color get flutterColor {
     try {
       final cleaned = color.replaceAll('#', '').trim();
@@ -105,13 +102,12 @@ class Subject {
   }
 }
 
-/// Result of GET /api/subjects — distinguishes empty-state causes.
 class SubjectsResult {
   final List<Subject> subjects;
   final int? gradeId;
   final String? gradeName;
   final String? alStream;
-  final String? message; // backend-provided hint when empty
+  final String? message;
   final bool success;
 
   SubjectsResult({
@@ -133,9 +129,6 @@ class SubjectsResult {
 class SubjectService {
   final http.Client _client = http.Client();
 
-  /// Fetches subjects. Throws [Exception] only on auth / server /
-  /// network failures. An empty (but successful) response is a
-  /// valid result so the UI can show the correct empty-state.
   Future<SubjectsResult> getSubjects() async {
     final token = await TokenStorage.getToken();
 
@@ -164,7 +157,6 @@ class SubjectService {
 
     debugPrint('Subjects API ${response.statusCode}: ${response.body}');
 
-    // Parse body once, tolerate empty body.
     Map<String, dynamic> data;
     try {
       final decoded = response.body.isEmpty
@@ -177,7 +169,6 @@ class SubjectService {
 
     final serverMessage = data['message'] as String?;
 
-    // ---- 200: success (may be empty but valid) ----
     if (response.statusCode == 200 && data['success'] == true) {
       final rawList = data['subjects'];
       if (rawList != null && rawList is! List) {
@@ -211,30 +202,25 @@ class SubjectService {
       );
     }
 
-    // ---- 401: unauthorized ----
     if (response.statusCode == 401) {
       await TokenStorage.clearAll();
       throw Exception(serverMessage ?? 'Session expired. Please login again.');
     }
 
-    // ---- 403: forbidden (no grade / not configured) ----
     if (response.statusCode == 403) {
       throw Exception(
         serverMessage ?? 'You do not have access to these subjects.',
       );
     }
 
-    // ---- 422: invalid A/L stream ----
     if (response.statusCode == 422) {
       throw Exception(serverMessage ?? 'Please select a valid A/L stream.');
     }
 
-    // ---- 5xx ----
     if (response.statusCode >= 500) {
       throw Exception(serverMessage ?? 'Server error. Please try again later.');
     }
 
-    // ---- other 4xx ----
     throw Exception(serverMessage ?? 'Failed to load subjects.');
   }
 
@@ -498,6 +484,11 @@ class _SubjectsScreenState extends State<SubjectsScreen>
                                   child: _SectionLabel(count: subjects.length),
                                 ),
                               ),
+                              // ═══════════════════════════════════════
+                              // WIDE + SHORT TILES
+                              //   crossAxisCount: 1  → full-width cards
+                              //   childAspectRatio: 4.2 → wide & short
+                              // ═══════════════════════════════════════
                               SliverPadding(
                                 padding: const EdgeInsets.fromLTRB(
                                   20,
@@ -508,10 +499,10 @@ class _SubjectsScreenState extends State<SubjectsScreen>
                                 sliver: SliverGrid(
                                   gridDelegate:
                                       const SliverGridDelegateWithFixedCrossAxisCount(
-                                        crossAxisCount: 2,
+                                        crossAxisCount: 1,
                                         crossAxisSpacing: 14,
-                                        mainAxisSpacing: 14,
-                                        childAspectRatio: 0.88,
+                                        mainAxisSpacing: 12,
+                                        childAspectRatio: 4.2,
                                       ),
                                   delegate: SliverChildBuilderDelegate((
                                     context,
@@ -1050,9 +1041,6 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-/// Empty-state that adapts to *why* the list is empty:
-///   • No grade selected (backend `message` present, no grade object)
-///   • Grade configured but no subjects → generic "no subjects" copy.
 class _EmptyView extends StatelessWidget {
   const _EmptyView({this.message, this.hasGrade = false, this.gradeName});
 
@@ -1297,6 +1285,9 @@ class SubjectIcon extends StatelessWidget {
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// _SubjectTile — HORIZONTAL LAYOUT (wide + short)
+// ═══════════════════════════════════════════════════════════
 class _SubjectTile extends StatefulWidget {
   final Subject subject;
   final int index;
@@ -1347,80 +1338,86 @@ class _SubjectTileState extends State<_SubjectTile> {
         onTapCancel: () => setState(() => _pressed = false),
         onTapUp: (_) => setState(() => _pressed = false),
         child: AnimatedScale(
-          scale: _pressed ? 0.97 : 1.0,
+          scale: _pressed ? 0.98 : 1.0,
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
           child: Container(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+            // Compact padding for the short horizontal layout
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
             decoration: BoxDecoration(
               color: _Palette.cardWhite,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(color: color.withValues(alpha: 0.16)),
               boxShadow: [
                 BoxShadow(
-                  color: color.withValues(alpha: 0.16),
-                  blurRadius: 20,
-                  offset: const Offset(0, 12),
+                  color: color.withValues(alpha: 0.14),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    SubjectIcon(subject: subject, color: color, size: 60),
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.arrow_forward_rounded,
-                        size: 13,
-                        color: color,
-                      ),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Text(
-                  subject.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: _Palette.textPrimary,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.09),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+                // ─── Icon (left)
+                SubjectIcon(subject: subject, color: color, size: 50),
+                const SizedBox(width: 14),
+
+                // ─── Name + quiz count (middle, expands)
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.quiz_rounded, size: 12, color: color),
-                      const SizedBox(width: 5),
                       Text(
-                        '$questionCount Quizzes',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          color: color,
+                        subject.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _Palette.textPrimary,
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
                         ),
                       ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(Icons.quiz_rounded, size: 12, color: color),
+                          const SizedBox(width: 5),
+                          Text(
+                            '$questionCount Quizzes',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: color,
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
+                  ),
+                ),
+
+                // ─── Arrow (right)
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        color.withValues(alpha: 0.14),
+                        color.withValues(alpha: 0.06),
+                      ],
+                    ),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: color.withValues(alpha: 0.22)),
+                  ),
+                  child: Icon(
+                    Icons.arrow_forward_rounded,
+                    size: 15,
+                    color: color,
                   ),
                 ),
               ],

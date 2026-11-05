@@ -1,17 +1,14 @@
 // ignore_for_file: file_names
 
-import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import 'package:quiz_lanka/Login.dart'; // LoginScreen + AuthProvider
-import 'package:quiz_lanka/config/api_config.dart';
-import 'package:quiz_lanka/main_navigation.dart';
+import 'package:quiz_lanka/Login.dart';
+import 'package:quiz_lanka/user_onboarding_screen.dart' show UserOnboardingScreen; // LoginScreen + AuthProvider
 
 // ============================================================
-// DESIGN TOKENS — "Aurora Glass" theme (matches LoginScreen)
+// DESIGN TOKENS
 // ============================================================
 class _RegisterTokens {
   _RegisterTokens._();
@@ -41,49 +38,6 @@ class _RegisterTokens {
 }
 
 // ============================================================
-// USER TYPE ENUM
-// ============================================================
-enum UserType { student, governmentExamCandidate }
-
-extension UserTypeX on UserType {
-  String get apiValue {
-    switch (this) {
-      case UserType.student:
-        return 'Student';
-      case UserType.governmentExamCandidate:
-        return 'Government Exam Candidate';
-    }
-  }
-
-  String get label {
-    switch (this) {
-      case UserType.student:
-        return 'Student';
-      case UserType.governmentExamCandidate:
-        return 'Government Exam Candidate';
-    }
-  }
-
-  String get subtitle {
-    switch (this) {
-      case UserType.student:
-        return 'School student preparing for O/L or A/L';
-      case UserType.governmentExamCandidate:
-        return 'Preparing for government competitive exams';
-    }
-  }
-
-  IconData get icon {
-    switch (this) {
-      case UserType.student:
-        return Icons.school_rounded;
-      case UserType.governmentExamCandidate:
-        return Icons.menu_book_rounded;
-    }
-  }
-}
-
-// ============================================================
 // REGISTER SCREEN
 // ============================================================
 class RegisterScreen extends StatefulWidget {
@@ -100,16 +54,11 @@ class _RegisterScreenState extends State<RegisterScreen>
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _schoolController = TextEditingController();
 
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
   bool _agreeToTerms = false;
   bool _isLoading = false;
-  String _selectedProvince = 'Western Province';
-
-  UserType _userType = UserType.student;
-  bool get _isStudent => _userType == UserType.student;
 
   AutovalidateMode _autovalidateMode = AutovalidateMode.disabled;
 
@@ -117,52 +66,9 @@ class _RegisterScreenState extends State<RegisterScreen>
   late Animation<double> _cardSlide;
   late Animation<double> _cardFade;
 
-  List<dynamic> _grades = [];
-  int? _selectedGradeId;
-  String? _selectedAlStream;
-
-  static const List<Map<String, String>> _alStreams = [
-    {'value': 'bio', 'label': 'Biological Science'},
-    {'value': 'maths', 'label': 'Mathematics'},
-    {'value': 'technology', 'label': 'Technology'},
-    {'value': 'arts', 'label': 'Arts'},
-    {'value': 'commerce', 'label': 'Commerce'},
-  ];
-
-  Map<String, dynamic>? get _selectedGrade {
-    for (final item in _grades) {
-      if (item is Map &&
-          item['id'].toString() == _selectedGradeId?.toString()) {
-        return Map<String, dynamic>.from(item);
-      }
-    }
-    return null;
-  }
-
-  bool get _isALGrade {
-    final category = (_selectedGrade?['category'] ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
-    return category == 'al';
-  }
-
-  final List<String> _provinces = [
-    'Western Province',
-    'Central Province',
-    'Southern Province',
-    'Northern Province',
-    'Eastern Province',
-    'North Western Province',
-    'North Central Province',
-    'Uva Province',
-    'Sabaragamuwa Province',
-  ];
-
   @override
   void initState() {
     super.initState();
-    _loadGrades();
 
     _animController = AnimationController(
       vsync: this,
@@ -182,47 +88,13 @@ class _RegisterScreenState extends State<RegisterScreen>
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _schoolController.dispose();
     _animController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadGrades() async {
-    try {
-      final url = '${ApiConfig.baseUrl}${ApiConfig.grades}';
-      final response = await http.get(Uri.parse(url));
-      final data = jsonDecode(response.body);
-
-      debugPrint("GRADES API RESPONSE:");
-      debugPrint(response.body);
-
-      if (mounted) {
-        setState(() {
-          _grades = data['data'] ?? [];
-        });
-      }
-    } catch (e) {
-      debugPrint(e.toString());
-    }
-  }
-
-  // ── REGISTER HANDLER — FIXED to match backend contract ─────
+  // ── REGISTER HANDLER — account creation only ───────────────
   Future<void> _handleRegister() async {
     setState(() => _autovalidateMode = AutovalidateMode.onUserInteraction);
-
-    if (_isStudent && _selectedGradeId == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Please select your grade')));
-      return;
-    }
-
-    if (_isStudent && _isALGrade && _selectedAlStream == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select your A/L stream')),
-      );
-      return;
-    }
 
     if (!_agreeToTerms) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -238,41 +110,11 @@ class _RegisterScreenState extends State<RegisterScreen>
     try {
       final authProvider = context.read<AuthProvider>();
 
-      // ✅ FIXED: non-students send `null` (backend validates as nullable),
-      //            not 0 / '' which break the DB / validation.
-      final int? gradeIdToSend = _isStudent ? _selectedGradeId : null;
-
-      final String? schoolToSend = _isStudent
-          ? (_schoolController.text.trim().isEmpty
-                ? null
-                : _schoolController.text.trim())
-          : null;
-
-      final String? districtToSend = _selectedProvince.trim().isEmpty
-          ? null
-          : _selectedProvince.trim();
-
-      // Only A/L students send an al_stream value.
-      final String? alStreamToSend = (_isStudent && _isALGrade)
-          ? _selectedAlStream
-          : null;
-
-      debugPrint(
-        "REGISTER → category=${_userType.apiValue}, "
-        "grade=$gradeIdToSend, school='$schoolToSend', "
-        "district='$districtToSend', al_stream='$alStreamToSend'",
-      );
-
       final success = await authProvider.register(
         _fullNameController.text.trim(),
         _emailController.text.trim(),
         _passwordController.text.trim(),
         _confirmPasswordController.text.trim(),
-        gradeIdToSend,
-        schoolToSend,
-        districtToSend,
-        _userType.apiValue,
-        alStreamToSend,
       );
 
       setState(() => _isLoading = false);
@@ -280,14 +122,16 @@ class _RegisterScreenState extends State<RegisterScreen>
       if (success && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Registration successful! Welcome aboard! 🎉'),
+            content: Text('Account created! Let\'s set up your profile 🎉'),
             backgroundColor: Colors.green,
             duration: Duration(seconds: 2),
           ),
         );
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const MainNavigation()),
+          MaterialPageRoute(
+            builder: (_) => const UserOnboardingScreen(),
+          ),
         );
       } else if (!success && mounted) {
         final error = context.read<AuthProvider>().error;
@@ -468,11 +312,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                 ),
                 const SizedBox(height: 22),
 
-                const _SectionLabel('I am a'),
-                const SizedBox(height: 12),
-                _buildUserTypeSelector(),
-                const SizedBox(height: 20),
-
+                // ── Personal Information ───────────────────────
                 const _SectionLabel('Personal Information'),
                 const SizedBox(height: 12),
                 _GlassTextField(
@@ -498,33 +338,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                 ),
                 const SizedBox(height: 20),
 
-                const _SectionLabel('Academic Information'),
-                const SizedBox(height: 12),
-
-                if (_isStudent) ...[
-                  _buildGradeDropdown(),
-                  if (_isALGrade) ...[
-                    const SizedBox(height: 12),
-                    _buildAlStreamDropdown(),
-                  ],
-                  const SizedBox(height: 12),
-                  _GlassTextField(
-                    controller: _schoolController,
-                    hint: 'School Name',
-                    icon: Icons.school_outlined,
-                    validator: (v) {
-                      if (v == null || v.isEmpty) {
-                        return 'Enter your school name';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                ],
-
-                _buildProvinceDropdown(),
-                const SizedBox(height: 20),
-
+                // ── Password ───────────────────────────────────
                 const _SectionLabel('Create Password'),
                 const SizedBox(height: 12),
                 _GlassTextField(
@@ -640,260 +454,6 @@ class _RegisterScreenState extends State<RegisterScreen>
                 ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildUserTypeSelector() {
-    return Column(
-      children: UserType.values.map((type) {
-        final selected = _userType == type;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: GestureDetector(
-            onTap: () {
-              if (_userType == type) return;
-              setState(() {
-                _userType = type;
-                if (!_isStudent) {
-                  _selectedGradeId = null;
-                  _selectedAlStream = null;
-                  _schoolController.clear();
-                }
-              });
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: selected
-                    ? _RegisterTokens.violet.withValues(alpha: 0.20)
-                    : Colors.white.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: selected
-                      ? _RegisterTokens.violet
-                      : Colors.white.withValues(alpha: 0.16),
-                  width: selected ? 1.6 : 1.0,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      gradient: selected
-                          ? const LinearGradient(
-                              colors: [
-                                _RegisterTokens.violet,
-                                _RegisterTokens.cyan,
-                              ],
-                            )
-                          : null,
-                      color: selected
-                          ? null
-                          : Colors.white.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      type.icon,
-                      color: selected
-                          ? Colors.white
-                          : _RegisterTokens.textSecondary,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          type.label,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: selected
-                                ? _RegisterTokens.textPrimary
-                                : _RegisterTokens.textPrimary.withValues(
-                                    alpha: 0.85,
-                                  ),
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          type.subtitle,
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            color: _RegisterTokens.textSecondary,
-                            fontWeight: FontWeight.w400,
-                            height: 1.3,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 20,
-                    height: 20,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: selected
-                          ? _RegisterTokens.violet
-                          : Colors.transparent,
-                      border: Border.all(
-                        color: selected
-                            ? _RegisterTokens.violet
-                            : _RegisterTokens.textSecondary.withValues(
-                                alpha: 0.5,
-                              ),
-                        width: 1.6,
-                      ),
-                    ),
-                    child: selected
-                        ? const Center(
-                            child: Icon(
-                              Icons.check,
-                              size: 12,
-                              color: Colors.white,
-                            ),
-                          )
-                        : null,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      }).toList(),
-    );
-  }
-
-  Widget _buildGradeDropdown() {
-    return _GlassDropdownShell(
-      icon: Icons.grade_outlined,
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<int>(
-          value: _selectedGradeId,
-          hint: Text(
-            'Select Grade',
-            style: TextStyle(
-              color: _RegisterTokens.textSecondary.withValues(alpha: 0.85),
-              fontSize: 14,
-            ),
-          ),
-          isExpanded: true,
-          isDense: true,
-          underline: const SizedBox.shrink(),
-          items: _grades
-              .map(
-                (g) => DropdownMenuItem<int>(
-                  value: g['id'],
-                  child: Text(
-                    g['name'] ?? 'Grade ${g['id']}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: _RegisterTokens.textPrimary,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              )
-              .toList(),
-          onChanged: (v) {
-            setState(() {
-              _selectedGradeId = v;
-              // A stream must be selected again whenever the grade changes.
-              _selectedAlStream = null;
-            });
-          },
-          dropdownColor: const Color(0xFF201E4A),
-          icon: Icon(
-            Icons.keyboard_arrow_down_rounded,
-            color: _RegisterTokens.textSecondary,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAlStreamDropdown() {
-    return _GlassDropdownShell(
-      icon: Icons.menu_book_rounded,
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: _selectedAlStream,
-          hint: Text(
-            'Select A/L Stream',
-            style: TextStyle(
-              color: _RegisterTokens.textSecondary.withValues(alpha: 0.85),
-              fontSize: 14,
-            ),
-          ),
-          isExpanded: true,
-          isDense: true,
-          underline: const SizedBox.shrink(),
-          items: _alStreams
-              .map(
-                (stream) => DropdownMenuItem<String>(
-                  value: stream['value'],
-                  child: Text(
-                    stream['label']!,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: _RegisterTokens.textPrimary,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              )
-              .toList(),
-          onChanged: (value) {
-            setState(() => _selectedAlStream = value);
-          },
-          dropdownColor: const Color(0xFF201E4A),
-          icon: Icon(
-            Icons.keyboard_arrow_down_rounded,
-            color: _RegisterTokens.textSecondary,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProvinceDropdown() {
-    return _GlassDropdownShell(
-      icon: Icons.location_on_outlined,
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: _selectedProvince,
-          isExpanded: true,
-          isDense: true,
-          underline: const SizedBox.shrink(),
-          items: _provinces
-              .map(
-                (p) => DropdownMenuItem<String>(
-                  value: p,
-                  child: Text(
-                    p,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: _RegisterTokens.textPrimary,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              )
-              .toList(),
-          onChanged: (v) => setState(() => _selectedProvince = v!),
-          dropdownColor: const Color(0xFF201E4A),
-          icon: Icon(
-            Icons.keyboard_arrow_down_rounded,
-            color: _RegisterTokens.textSecondary,
           ),
         ),
       ),
@@ -1025,7 +585,7 @@ class _RegisterScreenState extends State<RegisterScreen>
 }
 
 // ============================================================
-// PRIVATE, REUSABLE WIDGETS — unchanged
+// PRIVATE, REUSABLE WIDGETS
 // ============================================================
 
 class _BrandMark extends StatelessWidget {
@@ -1205,34 +765,6 @@ class _GlassTextField extends StatelessWidget {
             width: 1.8,
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _GlassDropdownShell extends StatelessWidget {
-  const _GlassDropdownShell({required this.icon, required this.child});
-  final IconData icon;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(_RegisterTokens.fieldRadius),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.20),
-          width: 1.2,
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: _RegisterTokens.textSecondary, size: 20),
-          const SizedBox(width: 10),
-          Expanded(child: child),
-        ],
       ),
     );
   }

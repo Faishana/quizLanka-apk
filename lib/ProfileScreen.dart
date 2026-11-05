@@ -1,9 +1,9 @@
 // ============================================================
-// 1. IMPORTS
+// PROFILE SCREEN — with shared models, service, palette, widgets
 // ============================================================
 import 'dart:async';
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -11,16 +11,17 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/Login.dart';
+import 'edit_profile_screen.dart';
 
 // ============================================================
-// 2. MODELS
+// 1. MODELS
 // ============================================================
 
 /// Education category (scholarship / ol / al / gov).
 class CategoryModel {
-  final String value; // 'scholarship' | 'ol' | 'al' | 'gov'
-  final String text; // Display label
-  final String icon; // Material icon key — mapped in UI
+  final String value;
+  final String text;
+  final String icon;
 
   CategoryModel({
     required this.value,
@@ -36,7 +37,6 @@ class CategoryModel {
     );
   }
 
-  /// Fallback list — used when the backend categories endpoint fails.
   static List<CategoryModel> fallbackList() => [
     CategoryModel(
       value: 'scholarship',
@@ -63,12 +63,12 @@ class CategoryModel {
   int get hashCode => value.hashCode;
 }
 
-/// Grade — now carries its `category` and optional `al_streams` (for A/L).
+/// Grade — carries its `category` and optional `al_streams`.
 class GradeModel {
   final int id;
   final String name;
-  final String category; // 'scholarship' | 'ol' | 'al' | 'gov'
-  final List<String> alStreams; // Only for 'al' grades
+  final String category;
+  final List<String> alStreams;
 
   GradeModel({
     required this.id,
@@ -116,7 +116,7 @@ class GradeModel {
 
 /// A/L stream option for UI dropdowns.
 class AlStreamOption {
-  final String value; // 'bio' | 'maths' | 'technology' | 'arts' | 'commerce'
+  final String value;
   final String text;
 
   AlStreamOption({required this.value, required this.text});
@@ -147,10 +147,8 @@ class ProfileModel {
   final GradeModel? grade;
   final String? avatarUrl;
   final String? userCategory;
-
-  // NEW fields
-  final String? gradeCategory; // 'scholarship' | 'ol' | 'al' | 'gov'
-  final String? alStream; // only for A/L
+  final String? gradeCategory;
+  final String? alStream;
 
   ProfileModel({
     required this.id,
@@ -176,7 +174,6 @@ class ProfileModel {
       parsedGrade = GradeModel.fromJson(rawGrade);
     }
 
-    // Category: prefer explicit field, fall back to grade.category
     final catFromJson = json['grade_category'];
     final category = (catFromJson is String && catFromJson.isNotEmpty)
         ? catFromJson
@@ -246,11 +243,6 @@ class ProfileModel {
     );
   }
 }
-
-// ============================================================
-// Statistics / Ranking / Achievement / Progress models
-// (unchanged — already null-safe)
-// ============================================================
 
 class ProfileStatistics {
   final int level;
@@ -509,7 +501,7 @@ class FullProfileResponse {
 }
 
 // ============================================================
-// 3. PROFILE SERVICE
+// 2. PROFILE SERVICE
 // ============================================================
 
 class ProfileService {
@@ -580,7 +572,6 @@ class ProfileService {
     }
   }
 
-  /// Fetch grade categories.
   Future<List<CategoryModel>> getCategories() async {
     final token = await TokenStorage.getToken();
     if (token == null || token.isEmpty) {
@@ -598,7 +589,9 @@ class ProfileService {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         if (data['success'] == true) {
           final list = data['data'] as List<dynamic>?;
-          if (list == null || list.isEmpty) return CategoryModel.fallbackList();
+          if (list == null || list.isEmpty) {
+            return CategoryModel.fallbackList();
+          }
           return list
               .whereType<Map<String, dynamic>>()
               .map(CategoryModel.fromJson)
@@ -612,7 +605,6 @@ class ProfileService {
     }
   }
 
-  /// Fetch grades, optionally filtered by category.
   Future<List<GradeModel>> getGrades({String? category}) async {
     final token = await TokenStorage.getToken();
     if (token == null || token.isEmpty) {
@@ -651,7 +643,6 @@ class ProfileService {
     }
   }
 
-  /// Update profile with grade_id + optional al_stream.
   Future<ProfileModel> updateProfile({
     required String name,
     int? gradeId,
@@ -760,9 +751,9 @@ class ProfileService {
 }
 
 // ============================================================
-// 4. PALETTE
+// 3. PALETTE (public — used by EditProfileScreen too)
 // ============================================================
-class _Palette {
+class Palette {
   static const bgTop = Color(0xFFF8F7FC);
   static const bgMid = Color(0xFFF2F0FA);
   static const bgBottom = Color(0xFFECE9F8);
@@ -787,12 +778,450 @@ class _Palette {
 }
 
 // ============================================================
-// 5. PROFILE SCREEN
+// 4. SHARED WIDGETS (public — reused by EditProfileScreen)
+// ============================================================
+
+class AuroraBackground extends StatelessWidget {
+  const AuroraBackground({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Opacity(
+            opacity: 0.16,
+            child: Image.asset(
+              'assets/profile_bg.png',
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) =>
+                  const SizedBox.shrink(),
+            ),
+          ),
+        ),
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Palette.bgTop, Palette.bgMid, Palette.bgBottom],
+                stops: [0.0, 0.55, 1.0],
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: -80,
+          left: -60,
+          child: Glow(
+            color: Palette.neonViolet.withValues(alpha: 0.10),
+            size: 260,
+          ),
+        ),
+        Positioned(
+          top: 120,
+          right: -80,
+          child: Glow(
+            color: Palette.neonCyan.withValues(alpha: 0.08),
+            size: 220,
+          ),
+        ),
+        Positioned(
+          bottom: 40,
+          left: -60,
+          child: Glow(
+            color: Palette.neonBlue.withValues(alpha: 0.07),
+            size: 240,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class Glow extends StatelessWidget {
+  const Glow({super.key, required this.color, required this.size});
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [color, color.withValues(alpha: 0.0)],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class TopHeader extends StatelessWidget {
+  const TopHeader({
+    super.key,
+    required this.onBack,
+    required this.onSettings,
+    required this.onNotifications,
+    this.title,
+  });
+
+  final VoidCallback onBack;
+  final VoidCallback onSettings;
+  final VoidCallback onNotifications;
+  final String? title;
+
+  @override
+  Widget build(BuildContext context) {
+    if (title != null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+        child: Row(
+          children: [
+            IconGhostButton(
+              icon: Icons.arrow_back_ios_new_rounded,
+              onTap: onBack,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              title!,
+              style: const TextStyle(
+                color: Palette.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const Spacer(),
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Row(
+        children: [
+          IconGhostButton(
+            icon: Icons.arrow_back_ios_new_rounded,
+            onTap: onBack,
+          ),
+          const Spacer(),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(
+                    colors: [Palette.neonCyan, Palette.neonViolet],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Palette.neonViolet.withValues(alpha: 0.5),
+                      blurRadius: 12,
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.psychology_alt_rounded,
+                  size: 16,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 8),
+              RichText(
+                text: const TextSpan(
+                  children: [
+                    TextSpan(
+                      text: 'QuizLanka ',
+                      style: TextStyle(
+                        color: Palette.textPrimary,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    TextSpan(
+                      text: 'AI',
+                      style: TextStyle(
+                        color: Palette.neonCyan,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          IconGhostButton(icon: Icons.settings_rounded, onTap: onSettings),
+          const SizedBox(width: 8),
+          IconGhostButton(
+            icon: Icons.notifications_rounded,
+            onTap: onNotifications,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class IconGhostButton extends StatelessWidget {
+  const IconGhostButton({super.key, required this.icon, required this.onTap});
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Palette.cardGlass,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: Palette.cardBorder),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: Icon(icon, size: 18, color: Palette.textPrimary),
+        ),
+      ),
+    );
+  }
+}
+
+class GlassCard extends StatelessWidget {
+  const GlassCard({
+    super.key,
+    required this.child,
+    this.padding,
+    this.borderColor,
+  });
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+  final Color? borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(22),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          width: double.infinity,
+          padding: padding ?? const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            color: Palette.cardGlass.withValues(alpha: 0.82),
+            border: Border.all(color: borderColor ?? Palette.cardBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Palette.neonViolet.withValues(alpha: 0.08),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class GradientButton extends StatelessWidget {
+  const GradientButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: const LinearGradient(
+          colors: [Palette.neonViolet, Palette.neonCyan],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Palette.neonViolet.withValues(alpha: 0.4),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AvatarInitial extends StatelessWidget {
+  const AvatarInitial({super.key, required this.name});
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Palette.neonViolet.withValues(alpha: 0.28),
+      alignment: Alignment.center,
+      child: Text(
+        name.isNotEmpty ? name[0].toUpperCase() : '?',
+        style: const TextStyle(
+          fontSize: 34,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+}
+
+// ---- Form widgets shared with edit screen ----
+
+class DarkDropdown<T> extends StatelessWidget {
+  const DarkDropdown({
+    super.key,
+    required this.value,
+    required this.hint,
+    required this.items,
+    required this.onChanged,
+  });
+
+  final T? value;
+  final String hint;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = onChanged == null || items.isEmpty;
+
+    // Safety net: DropdownButton asserts that when `value != null`, exactly
+    // one item in `items` has that same value. If a stored/synced string
+    // doesn't match any option, fall back to null so the hint shows instead
+    // of the screen crashing.
+    final hasMatchingItem =
+        value == null || items.any((item) => item.value == value);
+    final safeValue = hasMatchingItem ? value : null;
+
+    return DropdownButtonHideUnderline(
+      child: DropdownButton<T>(
+        value: safeValue, // <-- was: value
+        isExpanded: true,
+        dropdownColor: Palette.cardGlassLight,
+        borderRadius: BorderRadius.circular(14),
+        icon: const Icon(
+          Icons.keyboard_arrow_down_rounded,
+          color: Palette.textSecondary,
+        ),
+        hint: Text(
+          hint,
+          style: const TextStyle(color: Palette.textMuted, fontSize: 15),
+        ),
+        style: const TextStyle(color: Palette.textPrimary, fontSize: 15),
+        items: items,
+        onChanged: disabled ? null : onChanged,
+      ),
+    );
+  }
+}
+
+class FormFieldRow extends StatelessWidget {
+  const FormFieldRow({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.child,
+  });
+  final String label;
+  final IconData icon;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Palette.neonViolet.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 18, color: Palette.neonViolet),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 72,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Palette.textSecondary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================
+// 5. PROFILE SCREEN (read-only)
 // ============================================================
 
 class ProfileScreen extends StatefulWidget {
-  final Key? key;
-  const ProfileScreen({this.key}) : super(key: key);
+  const ProfileScreen({super.key});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -803,7 +1232,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final ImagePicker _picker = ImagePicker();
 
   bool _isLoading = true;
-  bool _isSaving = false;
   bool _uploadingAvatar = false;
   String? _error;
 
@@ -811,37 +1239,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
   FullProfileResponse? _fullProfile;
 
   List<CategoryModel> _categories = [];
-  List<GradeModel> _allGrades = []; // full cache
-  List<GradeModel> _filteredGrades = []; // by category
-
-  late TextEditingController _nameController;
-  late TextEditingController _schoolController;
-
-  // Edit state
-  CategoryModel? _selectedCategory;
-  GradeModel? _selectedGrade;
-  String? _selectedStream;
-  String? _selectedDistrict;
-  String? _selectedMedium;
+  List<GradeModel> _allGrades = [];
 
   Timer? _pollTimer;
   int _pollAttempts = 0;
   static const int _maxPollAttempts = 30;
 
-  bool get _isGovCandidate => _profile?.isGovernmentExamCandidate ?? false;
-
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController();
-    _schoolController = TextEditingController();
     _loadProfile();
   }
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _schoolController.dispose();
     _service.dispose();
     _pollTimer?.cancel();
     super.dispose();
@@ -855,9 +1266,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       final fullProfile = await _service.getProfile();
-      final profile = fullProfile.user;
 
-      // Load categories + grades (best-effort)
       List<CategoryModel> cats = CategoryModel.fallbackList();
       List<GradeModel> grades = <GradeModel>[];
       try {
@@ -873,45 +1282,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       setState(() {
         _fullProfile = fullProfile;
-        _profile = profile;
+        _profile = fullProfile.user;
         _categories = cats;
         _allGrades = grades;
-
-        _nameController.text = profile.name;
-        _schoolController.text = profile.school ?? '';
-
-        // Resolve category from profile
-        final catValue = profile.gradeCategory ?? profile.grade?.category;
-        _selectedCategory = catValue != null
-            ? cats.firstWhere(
-                (c) => c.value == catValue,
-                orElse: () => cats.first,
-              )
-            : null;
-
-        // Filter grades by category
-        _filteredGrades = _selectedCategory != null
-            ? grades
-                  .where((g) => g.category == _selectedCategory!.value)
-                  .toList()
-            : grades;
-
-        // Resolve grade
-        if (profile.grade != null) {
-          _selectedGrade = _filteredGrades.firstWhere(
-            (g) => g.id == profile.grade!.id,
-            orElse: () => profile.grade!,
-          );
-        } else {
-          _selectedGrade = null;
-        }
-
-        // Resolve stream
-        _selectedStream = profile.alStream;
-
-        _selectedDistrict = profile.district;
-        _selectedMedium = profile.preferredMedium;
-
         _isLoading = false;
       });
     } catch (e) {
@@ -920,6 +1293,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  Future<void> _openEditProfile() async {
+    if (_profile == null) return;
+
+    final updated = await Navigator.push<ProfileModel>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EditProfileScreen(
+          profile: _profile!,
+          categories: _categories,
+          allGrades: _allGrades,
+        ),
+      ),
+    );
+
+    if (updated == null || !mounted) return;
+
+    setState(() => _profile = updated);
+    await _loadProfile();
+    if (mounted) _showSnackBar('Profile updated successfully!');
   }
 
   Future<void> _pickProfilePhoto() async {
@@ -947,7 +1341,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<ImageSource?> _showImageSourcePicker() async {
     return showModalBottomSheet<ImageSource>(
       context: context,
-      backgroundColor: _Palette.cardGlass,
+      backgroundColor: Palette.cardGlass,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -960,7 +1354,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: _Palette.textMuted,
+                color: Palette.textMuted,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -968,31 +1362,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ListTile(
               leading: const Icon(
                 Icons.photo_library_rounded,
-                color: _Palette.neonCyan,
+                color: Palette.neonCyan,
               ),
               title: const Text(
                 'Gallery',
-                style: TextStyle(color: _Palette.textPrimary),
+                style: TextStyle(color: Palette.textPrimary),
               ),
               onTap: () => Navigator.pop(context, ImageSource.gallery),
             ),
             ListTile(
               leading: const Icon(
                 Icons.camera_alt_rounded,
-                color: _Palette.neonCyan,
+                color: Palette.neonCyan,
               ),
               title: const Text(
                 'Camera',
-                style: TextStyle(color: _Palette.textPrimary),
+                style: TextStyle(color: Palette.textPrimary),
               ),
               onTap: () => Navigator.pop(context, ImageSource.camera),
             ),
             const SizedBox(height: 8),
             ListTile(
-              leading: const Icon(Icons.close_rounded, color: _Palette.danger),
+              leading: const Icon(Icons.close_rounded, color: Palette.danger),
               title: const Text(
                 'Cancel',
-                style: TextStyle(color: _Palette.danger),
+                style: TextStyle(color: Palette.danger),
               ),
               onTap: () => Navigator.pop(context, null),
             ),
@@ -1008,17 +1402,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        backgroundColor: _Palette.cardGlass,
+        backgroundColor: Palette.cardGlass,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        content: Column(
+        content: const Column(
           mainAxisSize: MainAxisSize.min,
-          children: const [
-            CircularProgressIndicator(color: _Palette.neonCyan, strokeWidth: 3),
+          children: [
+            CircularProgressIndicator(color: Palette.neonCyan, strokeWidth: 3),
             SizedBox(height: 16),
             Text(
               'Generating Avatar...',
               style: TextStyle(
-                color: _Palette.textPrimary,
+                color: Palette.textPrimary,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
               ),
@@ -1026,7 +1420,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             SizedBox(height: 8),
             Text(
               'Your profile picture is being processed.',
-              style: TextStyle(color: _Palette.textSecondary, fontSize: 14),
+              style: TextStyle(color: Palette.textSecondary, fontSize: 14),
               textAlign: TextAlign.center,
             ),
           ],
@@ -1045,7 +1439,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (mounted) {
           Navigator.pop(context);
           _showSnackBar(
-            'Avatar generation is taking longer than expected. Please refresh later.',
+            'Avatar generation is taking longer than expected. '
+            'Please refresh later.',
           );
         }
         return;
@@ -1071,117 +1466,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
   }
 
-  /// Cascade: category → clears grade + stream
-  void _onCategoryChanged(
-    CategoryModel? cat,
-    void Function(void Function()) sheetSetState,
-  ) {
-    if (cat == null) return;
-    sheetSetState(() {
-      setState(() {
-        _selectedCategory = cat;
-        _selectedGrade = null;
-        _selectedStream = null;
-        _filteredGrades = _allGrades
-            .where((g) => g.category == cat.value)
-            .toList();
-      });
-    });
-  }
-
-  /// Cascade: grade → clears stream if grade isn't A/L
-  void _onGradeChanged(
-    GradeModel? grade,
-    void Function(void Function()) sheetSetState,
-  ) {
-    sheetSetState(() {
-      setState(() {
-        _selectedGrade = grade;
-        if (grade == null || !grade.isAdvancedLevel) {
-          _selectedStream = null;
-        }
-      });
-    });
-  }
-
-  Future<void> _saveProfile(
-    void Function(void Function()) sheetSetState,
-  ) async {
-    if (_profile == null) return;
-
-    if (_nameController.text.trim().isEmpty) {
-      _showSnackBar('Please enter your name', isError: true);
-      return;
-    }
-
-    if (!_isGovCandidate) {
-      if (_selectedCategory == null) {
-        _showSnackBar('Please select your education category', isError: true);
-        return;
-      }
-      if (_selectedGrade == null) {
-        _showSnackBar('Please select your grade', isError: true);
-        return;
-      }
-      // A/L requires a stream
-      if (_selectedGrade!.isAdvancedLevel &&
-          (_selectedStream == null || _selectedStream!.isEmpty)) {
-        _showSnackBar('Please select your A/L stream', isError: true);
-        return;
-      }
-      if (_schoolController.text.trim().isEmpty) {
-        _showSnackBar('Please enter your school', isError: true);
-        return;
-      }
-      if (_selectedMedium == null || _selectedMedium!.isEmpty) {
-        _showSnackBar('Please select your medium', isError: true);
-        return;
-      }
-    }
-
-    if (_selectedDistrict == null || _selectedDistrict!.isEmpty) {
-      _showSnackBar('Please select your district', isError: true);
-      return;
-    }
-
-    setState(() => _isSaving = true);
-    sheetSetState(() {});
-
-    try {
-      final isAl = _selectedGrade?.isAdvancedLevel ?? false;
-
-      final updated = await _service.updateProfile(
-        name: _nameController.text.trim(),
-        gradeId: _isGovCandidate ? null : _selectedGrade?.id,
-        gradeCategory: _isGovCandidate ? null : _selectedCategory?.value,
-        alStream: (_isGovCandidate || !isAl) ? null : _selectedStream,
-        school: _isGovCandidate ? null : _schoolController.text.trim(),
-        district: _selectedDistrict,
-        preferredMedium: _isGovCandidate ? null : _selectedMedium,
-      );
-
-      setState(() {
-        _profile = updated;
-        _isSaving = false;
-      });
-
-      if (mounted) Navigator.pop(context, true);
-      _showSnackBar('Profile updated successfully!');
-    } catch (e) {
-      setState(() => _isSaving = false);
-      sheetSetState(() {});
-      _showSnackBar(
-        e.toString().replaceFirst('Exception: ', ''),
-        isError: true,
-      );
-    }
-  }
-
   void _showSnackBar(String message, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? _Palette.danger : _Palette.neonViolet,
+        backgroundColor: isError ? Palette.danger : Palette.neonViolet,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         duration: const Duration(seconds: 3),
@@ -1193,108 +1482,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _showSnackBar('$feature — coming soon!');
   }
 
-  void _openEditProfileSheet() {
-    if (_profile == null) return;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, sheetSetState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom,
-              ),
-              child: FractionallySizedBox(
-                heightFactor: 0.9,
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: _Palette.bgMid,
-                    borderRadius: BorderRadius.vertical(
-                      top: Radius.circular(28),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 12),
-                      Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: _Palette.textMuted,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Edit Profile',
-                        style: TextStyle(
-                          color: _Palette.textPrimary,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                          child: _ProfileForm(
-                            nameController: _nameController,
-                            schoolController: _schoolController,
-                            categories: _categories,
-                            selectedCategory: _selectedCategory,
-                            onCategoryChanged: (c) =>
-                                _onCategoryChanged(c, sheetSetState),
-                            grades: _filteredGrades,
-                            selectedGrade: _selectedGrade,
-                            onGradeChanged: (g) =>
-                                _onGradeChanged(g, sheetSetState),
-                            selectedStream: _selectedStream,
-                            onStreamChanged: (s) => sheetSetState(() {
-                              setState(() => _selectedStream = s);
-                            }),
-                            selectedDistrict: _selectedDistrict,
-                            onDistrictChanged: (d) => sheetSetState(() {
-                              setState(() => _selectedDistrict = d);
-                            }),
-                            selectedMedium: _selectedMedium,
-                            onMediumChanged: (m) => sheetSetState(() {
-                              setState(() => _selectedMedium = m);
-                            }),
-                            isGovCandidate: _isGovCandidate,
-                          ),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                        child: _SaveButton(
-                          isSaving: _isSaving,
-                          onSave: () => _saveProfile(sheetSetState),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _Palette.bgTop,
+      backgroundColor: Palette.bgTop,
       body: Stack(
         children: [
-          const Positioned.fill(child: _AuroraBackground()),
+          const Positioned.fill(child: AuroraBackground()),
           SafeArea(
             child: Column(
               children: [
-                _TopHeader(
+                TopHeader(
                   onBack: () => Navigator.maybePop(context),
                   onSettings: () => _showComingSoon('Settings'),
                   onNotifications: () => _showComingSoon('Notifications'),
@@ -1307,10 +1505,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       : _ProfileContent(
                           profile: _profile!,
                           fullProfile: _fullProfile!,
-                          selectedGrade: _selectedGrade,
                           uploadingAvatar: _uploadingAvatar,
                           onAvatarTap: _pickProfilePhoto,
-                          onEditProfile: _openEditProfileSheet,
+                          onEditProfile: _openEditProfile,
                           onShareProfile: () =>
                               _showComingSoon('Share Profile'),
                           onViewAchievements: () =>
@@ -1326,210 +1523,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-// ------------------------------------------------------------
-// Background
-// ------------------------------------------------------------
-class _AuroraBackground extends StatelessWidget {
-  const _AuroraBackground();
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: Opacity(
-            opacity: 0.16,
-            child: Image.asset(
-              'assets/profile_bg.png',
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) =>
-                  const SizedBox.shrink(),
-            ),
-          ),
-        ),
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [_Palette.bgTop, _Palette.bgMid, _Palette.bgBottom],
-                stops: [0.0, 0.55, 1.0],
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          top: -80,
-          left: -60,
-          child: _Glow(
-            color: _Palette.neonViolet.withValues(alpha: 0.10),
-            size: 260,
-          ),
-        ),
-        Positioned(
-          top: 120,
-          right: -80,
-          child: _Glow(
-            color: _Palette.neonCyan.withValues(alpha: 0.08),
-            size: 220,
-          ),
-        ),
-        Positioned(
-          bottom: 40,
-          left: -60,
-          child: _Glow(
-            color: _Palette.neonBlue.withValues(alpha: 0.07),
-            size: 240,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _Glow extends StatelessWidget {
-  const _Glow({required this.color, required this.size});
-  final Color color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [color, color.withValues(alpha: 0.0)],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ------------------------------------------------------------
-// Top header
-// ------------------------------------------------------------
-class _TopHeader extends StatelessWidget {
-  const _TopHeader({
-    required this.onBack,
-    required this.onSettings,
-    required this.onNotifications,
-  });
-
-  final VoidCallback onBack;
-  final VoidCallback onSettings;
-  final VoidCallback onNotifications;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: Row(
-        children: [
-          _IconGhostButton(
-            icon: Icons.arrow_back_ios_new_rounded,
-            onTap: onBack,
-          ),
-          const Spacer(),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    colors: [_Palette.neonCyan, _Palette.neonViolet],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: _Palette.neonViolet.withValues(alpha: 0.5),
-                      blurRadius: 12,
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.psychology_alt_rounded,
-                  size: 16,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(width: 8),
-              RichText(
-                text: const TextSpan(
-                  children: [
-                    TextSpan(
-                      text: 'QuizLanka ',
-                      style: TextStyle(
-                        color: _Palette.textPrimary,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    TextSpan(
-                      text: 'AI',
-                      style: TextStyle(
-                        color: _Palette.neonCyan,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          _IconGhostButton(icon: Icons.settings_rounded, onTap: onSettings),
-          const SizedBox(width: 8),
-          _IconGhostButton(
-            icon: Icons.notifications_rounded,
-            onTap: onNotifications,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _IconGhostButton extends StatelessWidget {
-  const _IconGhostButton({required this.icon, required this.onTap})
-    : badge = null;
-  final IconData icon;
-  final VoidCallback onTap;
-  final int? badge;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Material(
-          color: _Palette.cardGlass,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-            side: const BorderSide(color: _Palette.cardBorder),
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: onTap,
-            child: SizedBox(
-              width: 40,
-              height: 40,
-              child: Icon(icon, size: 18, color: _Palette.textPrimary),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -1565,11 +1558,11 @@ class _LoadingViewState extends State<_LoadingView>
           height: height,
           width: width ?? double.infinity,
           decoration: BoxDecoration(
-            color: _Palette.cardGlass.withValues(
+            color: Palette.cardGlass.withValues(
               alpha: 0.5 + _controller.value * 0.3,
             ),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _Palette.cardBorder),
+            border: Border.all(color: Palette.cardBorder),
           ),
         );
       },
@@ -1613,23 +1606,23 @@ class _ErrorView extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: _Palette.dangerBg,
+                color: Palette.dangerBg,
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: _Palette.danger.withValues(alpha: 0.4),
+                  color: Palette.danger.withValues(alpha: 0.4),
                 ),
               ),
               child: const Icon(
                 Icons.error_outline_rounded,
                 size: 36,
-                color: _Palette.danger,
+                color: Palette.danger,
               ),
             ),
             const SizedBox(height: 20),
             const Text(
               'Unable to load profile',
               style: TextStyle(
-                color: _Palette.textPrimary,
+                color: Palette.textPrimary,
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
               ),
@@ -1639,13 +1632,13 @@ class _ErrorView extends StatelessWidget {
               message.replaceFirst('Exception: ', ''),
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color: _Palette.textSecondary,
+                color: Palette.textSecondary,
                 fontSize: 14,
                 height: 1.5,
               ),
             ),
             const SizedBox(height: 24),
-            _GradientButton(
+            GradientButton(
               label: 'Retry',
               icon: Icons.refresh_rounded,
               onTap: onRetry,
@@ -1664,7 +1657,6 @@ class _ProfileContent extends StatelessWidget {
   const _ProfileContent({
     required this.profile,
     required this.fullProfile,
-    required this.selectedGrade,
     required this.uploadingAvatar,
     required this.onAvatarTap,
     required this.onEditProfile,
@@ -1676,7 +1668,6 @@ class _ProfileContent extends StatelessWidget {
 
   final ProfileModel profile;
   final FullProfileResponse fullProfile;
-  final GradeModel? selectedGrade;
   final bool uploadingAvatar;
   final VoidCallback onAvatarTap;
   final VoidCallback onEditProfile;
@@ -1694,7 +1685,7 @@ class _ProfileContent extends StatelessWidget {
         children: [
           _ProfileHeroCard(
             profile: profile,
-            gradeName: selectedGrade?.name ?? profile.grade?.name,
+            gradeName: profile.grade?.name,
             statistics: fullProfile.statistics,
             uploading: uploadingAvatar,
             onAvatarTap: onAvatarTap,
@@ -1705,12 +1696,10 @@ class _ProfileContent extends StatelessWidget {
             streakDays: fullProfile.statistics.currentStreak,
           ),
           const SizedBox(height: 22),
-
           const _SectionHeader(title: 'Achievements', actionLabel: 'View All'),
           const SizedBox(height: 12),
           _AchievementsRow(achievements: fullProfile.achievements),
           const SizedBox(height: 22),
-
           const _SectionHeader(title: 'Learning Analytics'),
           const SizedBox(height: 12),
           _LearningAnalyticsSection(
@@ -1720,7 +1709,6 @@ class _ProfileContent extends StatelessWidget {
             aiImprovement: fullProfile.aiImprovement,
           ),
           const SizedBox(height: 22),
-
           const _SectionHeader(
             title: 'Subject Progress',
             actionLabel: 'View All Subjects',
@@ -1728,12 +1716,10 @@ class _ProfileContent extends StatelessWidget {
           const SizedBox(height: 12),
           _SubjectProgressRow(subjects: fullProfile.subjects),
           const SizedBox(height: 22),
-
           const _SectionHeader(title: 'Battle Statistics'),
           const SizedBox(height: 12),
           const _BattleStatisticsCard(),
           const SizedBox(height: 24),
-
           _ProfileActions(
             onEditProfile: onEditProfile,
             onShareProfile: onShareProfile,
@@ -1742,48 +1728,6 @@ class _ProfileContent extends StatelessWidget {
             onLearningReports: onLearningReports,
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ------------------------------------------------------------
-// Glass card
-// ------------------------------------------------------------
-class _GlassCard extends StatelessWidget {
-  const _GlassCard({required this.child, this.padding, this.borderColor});
-  final Widget child;
-  final EdgeInsetsGeometry? padding;
-  final Color? borderColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          width: double.infinity,
-          padding: padding ?? const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            color: _Palette.cardGlass.withValues(alpha: 0.82),
-            border: Border.all(color: borderColor ?? _Palette.cardBorder),
-            boxShadow: [
-              BoxShadow(
-                color: _Palette.neonViolet.withValues(alpha: 0.08),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: child,
-        ),
       ),
     );
   }
@@ -1807,7 +1751,7 @@ class _SectionHeader extends StatelessWidget {
         Text(
           title,
           style: const TextStyle(
-            color: _Palette.textPrimary,
+            color: Palette.textPrimary,
             fontSize: 16,
             fontWeight: FontWeight.w800,
           ),
@@ -1821,7 +1765,7 @@ class _SectionHeader extends StatelessWidget {
                 Text(
                   actionLabel!,
                   style: const TextStyle(
-                    color: _Palette.neonCyan,
+                    color: Palette.neonCyan,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1829,7 +1773,7 @@ class _SectionHeader extends StatelessWidget {
                 const Icon(
                   Icons.chevron_right_rounded,
                   size: 16,
-                  color: _Palette.neonCyan,
+                  color: Palette.neonCyan,
                 ),
               ],
             ),
@@ -1859,7 +1803,7 @@ class _ProfileHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _GlassCard(
+    return GlassCard(
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isNarrow = constraints.maxWidth < 340;
@@ -1879,7 +1823,6 @@ class _ProfileHeroCard extends StatelessWidget {
             userCategory: profile.userCategory,
             district: profile.district,
             alStream: profile.alStream,
-            gradeCategory: profile.gradeCategory,
           );
 
           if (isNarrow) {
@@ -1934,20 +1877,20 @@ class _AvatarWithLevel extends StatelessWidget {
                   shape: BoxShape.circle,
                   gradient: const SweepGradient(
                     colors: [
-                      _Palette.neonCyan,
-                      _Palette.neonViolet,
-                      _Palette.neonPink,
-                      _Palette.neonCyan,
+                      Palette.neonCyan,
+                      Palette.neonViolet,
+                      Palette.neonPink,
+                      Palette.neonCyan,
                     ],
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: _Palette.neonViolet.withValues(alpha: 0.55),
+                      color: Palette.neonViolet.withValues(alpha: 0.55),
                       blurRadius: 30,
                       spreadRadius: 1,
                     ),
                     BoxShadow(
-                      color: _Palette.neonCyan.withValues(alpha: 0.35),
+                      color: Palette.neonCyan.withValues(alpha: 0.35),
                       blurRadius: 18,
                     ),
                   ],
@@ -1956,13 +1899,13 @@ class _AvatarWithLevel extends StatelessWidget {
                   padding: const EdgeInsets.all(3),
                   decoration: const BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _Palette.bgMid,
+                    color: Palette.bgMid,
                   ),
                   child: ClipOval(
                     child: uploading
                         ? const Center(
                             child: CircularProgressIndicator(
-                              color: _Palette.neonCyan,
+                              color: Palette.neonCyan,
                               strokeWidth: 2.5,
                             ),
                           )
@@ -1971,9 +1914,9 @@ class _AvatarWithLevel extends StatelessWidget {
                             avatarUrl!,
                             fit: BoxFit.cover,
                             errorBuilder: (context, error, stackTrace) =>
-                                _AvatarInitial(name: name),
+                                AvatarInitial(name: name),
                           )
-                        : _AvatarInitial(name: name),
+                        : AvatarInitial(name: name),
                   ),
                 ),
               ),
@@ -1989,13 +1932,13 @@ class _AvatarWithLevel extends StatelessWidget {
                             colors: [Color(0xFF6B6B8A), Color(0xFF4E4E6A)],
                           )
                         : const LinearGradient(
-                            colors: [_Palette.neonCyan, _Palette.neonViolet],
+                            colors: [Palette.neonCyan, Palette.neonViolet],
                           ),
                     shape: BoxShape.circle,
-                    border: Border.all(color: _Palette.bgMid, width: 3),
+                    border: Border.all(color: Palette.bgMid, width: 3),
                     boxShadow: [
                       BoxShadow(
-                        color: _Palette.neonViolet.withValues(alpha: 0.5),
+                        color: Palette.neonViolet.withValues(alpha: 0.5),
                         blurRadius: 10,
                       ),
                     ],
@@ -2019,27 +1962,6 @@ class _AvatarWithLevel extends StatelessWidget {
           requiredXp: statistics.requiredXp,
         ),
       ],
-    );
-  }
-}
-
-class _AvatarInitial extends StatelessWidget {
-  const _AvatarInitial({required this.name});
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: _Palette.neonViolet.withValues(alpha: 0.28),
-      alignment: Alignment.center,
-      child: Text(
-        name.isNotEmpty ? name[0].toUpperCase() : '?',
-        style: const TextStyle(
-          fontSize: 34,
-          fontWeight: FontWeight.w800,
-          color: Colors.white,
-        ),
-      ),
     );
   }
 }
@@ -2070,7 +1992,7 @@ class _LevelXpBadge extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
-                    colors: [_Palette.neonBlue, _Palette.neonViolet],
+                    colors: [Palette.neonBlue, Palette.neonViolet],
                   ),
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -2092,13 +2014,13 @@ class _LevelXpBadge extends StatelessWidget {
               height: 6,
               child: Stack(
                 children: [
-                  Container(color: _Palette.cardGlassLight),
+                  Container(color: Palette.cardGlassLight),
                   FractionallySizedBox(
                     widthFactor: progress,
                     child: Container(
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [_Palette.neonCyan, _Palette.neonViolet],
+                          colors: [Palette.neonCyan, Palette.neonViolet],
                         ),
                       ),
                     ),
@@ -2111,7 +2033,7 @@ class _LevelXpBadge extends StatelessWidget {
           Text(
             '${_formatNum(currentXp)} / ${_formatNum(requiredXp)} XP',
             style: const TextStyle(
-              color: _Palette.textSecondary,
+              color: Palette.textSecondary,
               fontSize: 11.5,
               fontWeight: FontWeight.w600,
             ),
@@ -2143,7 +2065,6 @@ class _ProfileInfoBlock extends StatelessWidget {
     this.userCategory,
     this.district,
     this.alStream,
-    this.gradeCategory,
   });
 
   final String name;
@@ -2154,7 +2075,6 @@ class _ProfileInfoBlock extends StatelessWidget {
   final String? userCategory;
   final String? district;
   final String? alStream;
-  final String? gradeCategory;
 
   bool get _isGov =>
       (userCategory ?? '').trim().toLowerCase() == 'government exam candidate';
@@ -2168,7 +2088,7 @@ class _ProfileInfoBlock extends StatelessWidget {
         Text(
           name,
           style: const TextStyle(
-            color: _Palette.textPrimary,
+            color: Palette.textPrimary,
             fontSize: 21,
             fontWeight: FontWeight.w800,
           ),
@@ -2180,14 +2100,14 @@ class _ProfileInfoBlock extends StatelessWidget {
               const Icon(
                 Icons.location_on_rounded,
                 size: 14,
-                color: _Palette.textSecondary,
+                color: Palette.textSecondary,
               ),
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
                   district ?? 'Sri Lanka',
                   style: const TextStyle(
-                    color: _Palette.textSecondary,
+                    color: Palette.textSecondary,
                     fontSize: 13.5,
                   ),
                   overflow: TextOverflow.ellipsis,
@@ -2201,14 +2121,14 @@ class _ProfileInfoBlock extends StatelessWidget {
               const Icon(
                 Icons.location_city_rounded,
                 size: 14,
-                color: _Palette.textSecondary,
+                color: Palette.textSecondary,
               ),
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
                   school!,
                   style: const TextStyle(
-                    color: _Palette.textSecondary,
+                    color: Palette.textSecondary,
                     fontSize: 13.5,
                   ),
                   overflow: TextOverflow.ellipsis,
@@ -2224,17 +2144,16 @@ class _ProfileInfoBlock extends StatelessWidget {
             if (_isGov)
               _NeonChip(
                 label: 'Government Exam Candidate',
-                color: _Palette.neonGold,
+                color: Palette.neonGold,
               )
             else if (gradeName != null && gradeName!.isNotEmpty)
-              _NeonChip(label: gradeName!, color: _Palette.neonViolet),
-            // A/L stream chip
+              _NeonChip(label: gradeName!, color: Palette.neonViolet),
             if (streamLabel.isNotEmpty)
-              _NeonChip(label: streamLabel, color: _Palette.neonPink),
+              _NeonChip(label: streamLabel, color: Palette.neonPink),
             if (medium != null && medium!.isNotEmpty)
-              _NeonChip(label: '$medium Medium', color: _Palette.neonCyan),
+              _NeonChip(label: '$medium Medium', color: Palette.neonCyan),
             if (targetExam != null && targetExam!.isNotEmpty)
-              _NeonChip(label: targetExam!, color: _Palette.neonGold),
+              _NeonChip(label: targetExam!, color: Palette.neonGold),
           ],
         ),
       ],
@@ -2278,14 +2197,14 @@ class _RankingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _GlassCard(
+    return GlassCard(
       padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
       child: Row(
         children: [
           Expanded(
             child: _RankStat(
               icon: Icons.emoji_events_rounded,
-              iconColor: _Palette.neonGold,
+              iconColor: Palette.neonGold,
               label: 'National Rank',
               value: ranking.nationalRank > 0
                   ? '#${ranking.nationalRank}'
@@ -2296,7 +2215,7 @@ class _RankingCard extends StatelessWidget {
           Expanded(
             child: _RankStat(
               icon: Icons.account_balance_rounded,
-              iconColor: _Palette.neonCyan,
+              iconColor: Palette.neonCyan,
               label: 'School Rank',
               value: ranking.schoolRank > 0 ? '#${ranking.schoolRank}' : '—',
             ),
@@ -2305,7 +2224,7 @@ class _RankingCard extends StatelessWidget {
           Expanded(
             child: _RankStat(
               icon: Icons.local_fire_department_rounded,
-              iconColor: _Palette.neonPink,
+              iconColor: Palette.neonPink,
               label: 'Streak',
               value: '$streakDays Days',
             ),
@@ -2319,7 +2238,7 @@ class _RankingCard extends StatelessWidget {
 class _VerticalDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(width: 1, height: 44, color: _Palette.cardBorder);
+    return Container(width: 1, height: 44, color: Palette.cardBorder);
   }
 }
 
@@ -2346,7 +2265,7 @@ class _RankStat extends StatelessWidget {
         Text(
           value,
           style: const TextStyle(
-            color: _Palette.textPrimary,
+            color: Palette.textPrimary,
             fontSize: 16,
             fontWeight: FontWeight.w800,
           ),
@@ -2355,7 +2274,7 @@ class _RankStat extends StatelessWidget {
         Text(
           label,
           textAlign: TextAlign.center,
-          style: const TextStyle(color: _Palette.textSecondary, fontSize: 11),
+          style: const TextStyle(color: Palette.textSecondary, fontSize: 11),
         ),
       ],
     );
@@ -2372,7 +2291,7 @@ class _AchievementsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (achievements.isEmpty) {
-      return const _GlassCard(
+      return const GlassCard(
         child: _EmptyRow(
           icon: Icons.emoji_events_outlined,
           text: 'No achievements yet',
@@ -2401,10 +2320,10 @@ class _AchievementCard extends StatelessWidget {
       try {
         return Color(int.parse(achievement.color!.replaceFirst('#', '0xFF')));
       } catch (_) {
-        return _Palette.neonGold;
+        return Palette.neonGold;
       }
     }
-    return _Palette.neonGold;
+    return Palette.neonGold;
   }
 
   @override
@@ -2412,7 +2331,7 @@ class _AchievementCard extends StatelessWidget {
     final color = _getColor();
     return SizedBox(
       width: 128,
-      child: _GlassCard(
+      child: GlassCard(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         borderColor: color.withValues(alpha: 0.35),
         child: Column(
@@ -2440,7 +2359,7 @@ class _AchievementCard extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: _Palette.textPrimary,
+                color: Palette.textPrimary,
                 fontSize: 12.5,
                 fontWeight: FontWeight.w700,
               ),
@@ -2452,7 +2371,7 @@ class _AchievementCard extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: _Palette.textSecondary,
+                color: Palette.textSecondary,
                 fontSize: 10.5,
                 height: 1.3,
               ),
@@ -2497,19 +2416,19 @@ class _LearningAnalyticsSection extends StatelessWidget {
             final tiles = [
               _StatTile(
                 icon: Icons.fact_check_rounded,
-                color: _Palette.neonViolet,
+                color: Palette.neonViolet,
                 label: 'Quizzes Completed',
                 value: '${statistics.completedQuizzes}',
               ),
               _StatTile(
                 icon: Icons.track_changes_rounded,
-                color: _Palette.neonPink,
+                color: Palette.neonPink,
                 label: 'Average Accuracy',
                 value: '${statistics.averageAccuracy.toStringAsFixed(1)}%',
               ),
               _StatTile(
                 icon: Icons.schedule_rounded,
-                color: _Palette.neonCyan,
+                color: Palette.neonCyan,
                 label: 'Time Spent Learning',
                 value: _formatMinutes(statistics.timeSpentMinutes),
               ),
@@ -2572,7 +2491,7 @@ class _StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _GlassCard(
+    return GlassCard(
       padding: const EdgeInsets.all(14),
       borderColor: color.withValues(alpha: 0.3),
       child: Row(
@@ -2595,7 +2514,7 @@ class _StatTile extends StatelessWidget {
                 Text(
                   value,
                   style: const TextStyle(
-                    color: _Palette.textPrimary,
+                    color: Palette.textPrimary,
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
                   ),
@@ -2603,7 +2522,7 @@ class _StatTile extends StatelessWidget {
                 Text(
                   label,
                   style: const TextStyle(
-                    color: _Palette.textSecondary,
+                    color: Palette.textSecondary,
                     fontSize: 11.5,
                   ),
                 ),
@@ -2626,7 +2545,7 @@ class _WeeklyProgressChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) {
-      return const _GlassCard(
+      return const GlassCard(
         child: _EmptyRow(
           icon: Icons.show_chart_rounded,
           text: 'No weekly progress yet',
@@ -2637,7 +2556,7 @@ class _WeeklyProgressChart extends StatelessWidget {
     final values = data.map((e) => e.value).toList();
     final latest = values.last;
 
-    return _GlassCard(
+    return GlassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2647,7 +2566,7 @@ class _WeeklyProgressChart extends StatelessWidget {
               const Text(
                 'Weekly Progress',
                 style: TextStyle(
-                  color: _Palette.textPrimary,
+                  color: Palette.textPrimary,
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
                 ),
@@ -2658,13 +2577,13 @@ class _WeeklyProgressChart extends StatelessWidget {
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: _Palette.neonCyan.withValues(alpha: 0.16),
+                  color: Palette.neonCyan.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
                   '${latest.toStringAsFixed(1)}%',
                   style: const TextStyle(
-                    color: _Palette.neonCyan,
+                    color: Palette.neonCyan,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -2686,7 +2605,7 @@ class _WeeklyProgressChart extends StatelessWidget {
                 Text(
                   item.day,
                   style: const TextStyle(
-                    color: _Palette.textMuted,
+                    color: Palette.textMuted,
                     fontSize: 10.5,
                   ),
                 ),
@@ -2716,7 +2635,7 @@ class _WeeklyProgressPainter extends CustomPainter {
     }
 
     final gridPaint = Paint()
-      ..color = _Palette.cardBorder
+      ..color = Palette.cardBorder
       ..strokeWidth = 1;
     for (int i = 0; i <= 3; i++) {
       final y = size.height / 3 * i;
@@ -2747,8 +2666,8 @@ class _WeeklyProgressPainter extends CustomPainter {
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [
-          _Palette.neonCyan.withValues(alpha: 0.35),
-          _Palette.neonCyan.withValues(alpha: 0.0),
+          Palette.neonCyan.withValues(alpha: 0.35),
+          Palette.neonCyan.withValues(alpha: 0.0),
         ],
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
     canvas.drawPath(fillPath, fillPaint);
@@ -2758,12 +2677,12 @@ class _WeeklyProgressPainter extends CustomPainter {
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.round
       ..shader = const LinearGradient(
-        colors: [_Palette.neonCyan, _Palette.neonViolet],
+        colors: [Palette.neonCyan, Palette.neonViolet],
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
     canvas.drawPath(path, linePaint);
 
     final dotFill = Paint()..color = Colors.white;
-    final dotGlow = Paint()..color = _Palette.neonCyan.withValues(alpha: 0.5);
+    final dotGlow = Paint()..color = Palette.neonCyan.withValues(alpha: 0.5);
     for (int i = 0; i < values.length; i++) {
       final p = pointFor(i);
       canvas.drawCircle(p, 6, dotGlow);
@@ -2786,25 +2705,25 @@ class _StrongestSubjectCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (subject == null || subject!.name.isEmpty) {
-      return const _GlassCard(
+      return const GlassCard(
         child: _EmptyRow(
           icon: Icons.star_border_rounded,
           text: 'Not enough data yet',
         ),
       );
     }
-    return _GlassCard(
-      borderColor: _Palette.neonGold.withValues(alpha: 0.35),
+    return GlassCard(
+      borderColor: Palette.neonGold.withValues(alpha: 0.35),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: const [
-              Icon(Icons.star_rounded, color: _Palette.neonGold, size: 18),
+          const Row(
+            children: [
+              Icon(Icons.star_rounded, color: Palette.neonGold, size: 18),
               SizedBox(width: 6),
               Text(
                 'Strongest Subject',
-                style: TextStyle(color: _Palette.textSecondary, fontSize: 12),
+                style: TextStyle(color: Palette.textSecondary, fontSize: 12),
               ),
             ],
           ),
@@ -2812,7 +2731,7 @@ class _StrongestSubjectCard extends StatelessWidget {
           Text(
             subject!.name,
             style: const TextStyle(
-              color: _Palette.textPrimary,
+              color: Palette.textPrimary,
               fontSize: 18,
               fontWeight: FontWeight.w800,
             ),
@@ -2821,7 +2740,7 @@ class _StrongestSubjectCard extends StatelessWidget {
           Text(
             '${subject!.accuracy.toStringAsFixed(0)}% Accuracy',
             style: const TextStyle(
-              color: _Palette.neonGold,
+              color: Palette.neonGold,
               fontSize: 12.5,
               fontWeight: FontWeight.w700,
             ),
@@ -2839,16 +2758,16 @@ class _AiImprovementCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (improvement == null) {
-      return _GlassCard(
-        borderColor: _Palette.neonViolet.withValues(alpha: 0.35),
+      return GlassCard(
+        borderColor: Palette.neonViolet.withValues(alpha: 0.35),
         child: const _EmptyRow(
           icon: Icons.auto_awesome_rounded,
           text: 'AI Improvement — Coming Soon',
         ),
       );
     }
-    return _GlassCard(
-      borderColor: _Palette.neonViolet.withValues(alpha: 0.35),
+    return GlassCard(
+      borderColor: Palette.neonViolet.withValues(alpha: 0.35),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2859,7 +2778,7 @@ class _AiImprovementCard extends StatelessWidget {
                 height: 30,
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
-                    colors: [_Palette.neonCyan, _Palette.neonViolet],
+                    colors: [Palette.neonCyan, Palette.neonViolet],
                   ),
                   borderRadius: BorderRadius.circular(9),
                 ),
@@ -2872,7 +2791,7 @@ class _AiImprovementCard extends StatelessWidget {
               const SizedBox(width: 8),
               const Text(
                 'AI Improvement',
-                style: TextStyle(color: _Palette.textSecondary, fontSize: 12),
+                style: TextStyle(color: Palette.textSecondary, fontSize: 12),
               ),
             ],
           ),
@@ -2881,14 +2800,14 @@ class _AiImprovementCard extends StatelessWidget {
             '${improvement!.percentage >= 0 ? '+' : ''}'
             '${improvement!.percentage.toStringAsFixed(0)}%',
             style: const TextStyle(
-              color: _Palette.textPrimary,
+              color: Palette.textPrimary,
               fontSize: 18,
               fontWeight: FontWeight.w800,
             ),
           ),
           const Text(
             'Improvement this week',
-            style: TextStyle(color: _Palette.textSecondary, fontSize: 11.5),
+            style: TextStyle(color: Palette.textSecondary, fontSize: 11.5),
           ),
         ],
       ),
@@ -2929,27 +2848,27 @@ class _SubjectProgressRow extends StatelessWidget {
       case 'mathematics':
       case 'maths':
       case 'math':
-        return _Palette.neonBlue;
+        return Palette.neonBlue;
       case 'science':
-        return _Palette.neonCyan;
+        return Palette.neonCyan;
       case 'english':
-        return _Palette.neonPink;
+        return Palette.neonPink;
       case 'ict':
       case 'information technology':
-        return _Palette.neonViolet;
+        return Palette.neonViolet;
       case 'sinhala':
-        return _Palette.neonGold;
+        return Palette.neonGold;
       case 'tamil':
-        return _Palette.neonGreen;
+        return Palette.neonGreen;
       default:
-        return _Palette.neonViolet;
+        return Palette.neonViolet;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     if (subjects.isEmpty) {
-      return const _GlassCard(
+      return const GlassCard(
         child: _EmptyRow(
           icon: Icons.menu_book_outlined,
           text: 'No subject progress yet',
@@ -2990,7 +2909,7 @@ class _SubjectCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: 128,
-      child: _GlassCard(
+      child: GlassCard(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         borderColor: color.withValues(alpha: 0.3),
         child: Column(
@@ -3004,7 +2923,7 @@ class _SubjectCard extends StatelessWidget {
                   child: Text(
                     subject.name,
                     style: const TextStyle(
-                      color: _Palette.textSecondary,
+                      color: Palette.textSecondary,
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                     ),
@@ -3030,7 +2949,7 @@ class _SubjectCard extends StatelessWidget {
                   Text(
                     '${subject.accuracy.toStringAsFixed(0)}%',
                     style: const TextStyle(
-                      color: _Palette.textPrimary,
+                      color: Palette.textPrimary,
                       fontSize: 13,
                       fontWeight: FontWeight.w800,
                     ),
@@ -3042,14 +2961,14 @@ class _SubjectCard extends StatelessWidget {
             Text(
               '${subject.xp} XP',
               style: const TextStyle(
-                color: _Palette.textPrimary,
+                color: Palette.textPrimary,
                 fontSize: 11.5,
                 fontWeight: FontWeight.w700,
               ),
             ),
             Text(
               'Rank #${subject.rank}',
-              style: const TextStyle(color: _Palette.textMuted, fontSize: 10.5),
+              style: const TextStyle(color: Palette.textMuted, fontSize: 10.5),
             ),
           ],
         ),
@@ -3068,7 +2987,7 @@ class _RingPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2 - 4;
     final bgPaint = Paint()
-      ..color = _Palette.cardGlassLight
+      ..color = Palette.cardGlassLight
       ..style = PaintingStyle.stroke
       ..strokeWidth = 5;
     canvas.drawCircle(center, radius, bgPaint);
@@ -3100,8 +3019,8 @@ class _BattleStatisticsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _GlassCard(
-      borderColor: _Palette.neonBlue.withValues(alpha: 0.3),
+    return GlassCard(
+      borderColor: Palette.neonBlue.withValues(alpha: 0.3),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3111,13 +3030,13 @@ class _BattleStatisticsCard extends StatelessWidget {
                 width: 34,
                 height: 34,
                 decoration: BoxDecoration(
-                  color: _Palette.neonBlue.withValues(alpha: 0.16),
+                  color: Palette.neonBlue.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(
                   Icons.sports_esports_rounded,
                   size: 18,
-                  color: _Palette.neonBlue,
+                  color: Palette.neonBlue,
                 ),
               ),
               const SizedBox(width: 10),
@@ -3125,7 +3044,7 @@ class _BattleStatisticsCard extends StatelessWidget {
                 child: Text(
                   'Multiplayer battles are launching soon',
                   style: TextStyle(
-                    color: _Palette.textPrimary,
+                    color: Palette.textPrimary,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                   ),
@@ -3137,13 +3056,13 @@ class _BattleStatisticsCard extends StatelessWidget {
                   vertical: 5,
                 ),
                 decoration: BoxDecoration(
-                  color: _Palette.neonBlue.withValues(alpha: 0.16),
+                  color: Palette.neonBlue.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Text(
                   'Coming Soon',
                   style: TextStyle(
-                    color: _Palette.neonBlue,
+                    color: Palette.neonBlue,
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                   ),
@@ -3153,9 +3072,10 @@ class _BattleStatisticsCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           const Text(
-            'Wins, win rate, fastest answer, multiplayer rank and tournament badges will show up here once battles go live.',
+            'Wins, win rate, fastest answer, multiplayer rank and '
+            'tournament badges will show up here once battles go live.',
             style: TextStyle(
-              color: _Palette.textSecondary,
+              color: Palette.textSecondary,
               fontSize: 12,
               height: 1.4,
             ),
@@ -3178,12 +3098,12 @@ class _EmptyRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: _Palette.textMuted, size: 20),
+        Icon(icon, color: Palette.textMuted, size: 20),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(color: _Palette.textSecondary, fontSize: 13),
+            style: const TextStyle(color: Palette.textSecondary, fontSize: 13),
           ),
         ),
       ],
@@ -3218,31 +3138,31 @@ class _ProfileActions extends StatelessWidget {
         _ActionButton(
           label: 'Edit Profile',
           icon: Icons.person_outline_rounded,
-          colors: const [_Palette.neonBlue, _Palette.neonViolet],
+          colors: const [Palette.neonBlue, Palette.neonViolet],
           onTap: onEditProfile,
         ),
         _ActionButton(
           label: 'Share Profile',
           icon: Icons.share_rounded,
-          colors: const [_Palette.neonCyan, _Palette.neonBlue],
+          colors: const [Palette.neonCyan, Palette.neonBlue],
           onTap: onShareProfile,
         ),
         _ActionButton(
           label: 'View Achievements',
           icon: Icons.emoji_events_outlined,
-          colors: const [_Palette.neonViolet, _Palette.neonPink],
+          colors: const [Palette.neonViolet, Palette.neonPink],
           onTap: onViewAchievements,
         ),
         _ActionButton(
           label: 'Premium Upgrade',
           icon: Icons.workspace_premium_rounded,
-          colors: const [_Palette.neonGold, Color(0xFFE0893D)],
+          colors: const [Palette.neonGold, Color(0xFFE0893D)],
           onTap: onPremiumUpgrade,
         ),
         _ActionButton(
           label: 'Learning Reports',
           icon: Icons.bar_chart_rounded,
-          colors: const [_Palette.neonBlue, _Palette.neonCyan],
+          colors: const [Palette.neonBlue, Palette.neonCyan],
           onTap: onLearningReports,
         ),
       ],
@@ -3317,391 +3237,6 @@ class _ActionButton extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _GradientButton extends StatelessWidget {
-  const _GradientButton({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-  });
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: const LinearGradient(
-          colors: [_Palette.neonViolet, _Palette.neonCyan],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: _Palette.neonViolet.withValues(alpha: 0.4),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ------------------------------------------------------------
-// Edit-profile form — new cascade: Category → Grade → Stream
-// ------------------------------------------------------------
-class _ProfileForm extends StatelessWidget {
-  const _ProfileForm({
-    required this.nameController,
-    required this.schoolController,
-    required this.categories,
-    required this.selectedCategory,
-    required this.onCategoryChanged,
-    required this.grades,
-    required this.selectedGrade,
-    required this.onGradeChanged,
-    required this.selectedStream,
-    required this.onStreamChanged,
-    required this.selectedDistrict,
-    required this.onDistrictChanged,
-    required this.selectedMedium,
-    required this.onMediumChanged,
-    required this.isGovCandidate,
-  });
-
-  final TextEditingController nameController;
-  final TextEditingController schoolController;
-  final List<CategoryModel> categories;
-  final CategoryModel? selectedCategory;
-  final ValueChanged<CategoryModel?> onCategoryChanged;
-  final List<GradeModel> grades;
-  final GradeModel? selectedGrade;
-  final ValueChanged<GradeModel?> onGradeChanged;
-  final String? selectedStream;
-  final ValueChanged<String?> onStreamChanged;
-  final String? selectedDistrict;
-  final ValueChanged<String> onDistrictChanged;
-  final String? selectedMedium;
-  final ValueChanged<String> onMediumChanged;
-  final bool isGovCandidate;
-
-  @override
-  Widget build(BuildContext context) {
-    final showStream =
-        !isGovCandidate &&
-        selectedGrade != null &&
-        selectedGrade!.isAdvancedLevel;
-
-    return _GlassCard(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: Column(
-        children: [
-          _FormField(
-            label: 'Name',
-            icon: Icons.person_outline_rounded,
-            child: TextField(
-              controller: nameController,
-              cursorColor: _Palette.neonCyan,
-              decoration: const InputDecoration(
-                hintText: 'Enter your full name',
-                hintStyle: TextStyle(color: _Palette.textMuted),
-                border: InputBorder.none,
-                isDense: true,
-              ),
-              style: const TextStyle(fontSize: 15, color: _Palette.textPrimary),
-            ),
-          ),
-
-          if (!isGovCandidate) ...[
-            const Divider(height: 1, color: _Palette.cardBorder),
-            _FormField(
-              label: 'Category',
-              icon: Icons.category_outlined,
-              child: _DarkDropdown<CategoryModel>(
-                value: selectedCategory,
-                hint: 'Select education category',
-                items: categories
-                    .map((c) => DropdownMenuItem(value: c, child: Text(c.text)))
-                    .toList(),
-                onChanged: onCategoryChanged,
-              ),
-            ),
-            const Divider(height: 1, color: _Palette.cardBorder),
-            _FormField(
-              label: 'Grade',
-              icon: Icons.school_outlined,
-              child: _DarkDropdown<GradeModel>(
-                value: selectedGrade,
-                hint: selectedCategory == null
-                    ? 'Select category first'
-                    : 'Select your grade',
-                items: grades
-                    .map((g) => DropdownMenuItem(value: g, child: Text(g.name)))
-                    .toList(),
-                onChanged: selectedCategory == null ? null : onGradeChanged,
-              ),
-            ),
-            if (showStream) ...[
-              const Divider(height: 1, color: _Palette.cardBorder),
-              _FormField(
-                label: 'Stream',
-                icon: Icons.account_tree_outlined,
-                child: _DarkDropdown<String>(
-                  value: selectedStream,
-                  hint: 'Select A/L stream',
-                  items: AlStreamOption.all
-                      .map(
-                        (s) => DropdownMenuItem(
-                          value: s.value,
-                          child: Text(s.text),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: onStreamChanged,
-                ),
-              ),
-            ],
-            const Divider(height: 1, color: _Palette.cardBorder),
-            _FormField(
-              label: 'School',
-              icon: Icons.business_outlined,
-              child: TextField(
-                controller: schoolController,
-                cursorColor: _Palette.neonCyan,
-                decoration: const InputDecoration(
-                  hintText: 'Enter your school name',
-                  hintStyle: TextStyle(color: _Palette.textMuted),
-                  border: InputBorder.none,
-                  isDense: true,
-                ),
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: _Palette.textPrimary,
-                ),
-              ),
-            ),
-          ],
-
-          const Divider(height: 1, color: _Palette.cardBorder),
-          _FormField(
-            label: 'District',
-            icon: Icons.location_city_outlined,
-            child: _DarkDropdown<String>(
-              value: selectedDistrict,
-              hint: 'Select your district',
-              items: ProfileService.districts
-                  .map((d) => DropdownMenuItem(value: d, child: Text(d)))
-                  .toList(),
-              onChanged: (d) {
-                if (d != null) onDistrictChanged(d);
-              },
-            ),
-          ),
-
-          if (!isGovCandidate) ...[
-            const Divider(height: 1, color: _Palette.cardBorder),
-            _FormField(
-              label: 'Medium',
-              icon: Icons.translate_rounded,
-              child: _DarkDropdown<String>(
-                value: selectedMedium,
-                hint: 'Select your medium',
-                items: ProfileService.mediums
-                    .map((m) => DropdownMenuItem(value: m, child: Text(m)))
-                    .toList(),
-                onChanged: (m) {
-                  if (m != null) onMediumChanged(m);
-                },
-              ),
-            ),
-          ],
-          const SizedBox(height: 4),
-        ],
-      ),
-    );
-  }
-}
-
-class _DarkDropdown<T> extends StatelessWidget {
-  const _DarkDropdown({
-    required this.value,
-    required this.hint,
-    required this.items,
-    required this.onChanged,
-  });
-
-  final T? value;
-  final String hint;
-  final List<DropdownMenuItem<T>> items;
-  final ValueChanged<T?>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final disabled = onChanged == null || items.isEmpty;
-    return DropdownButtonHideUnderline(
-      child: DropdownButton<T>(
-        value: value,
-        isExpanded: true,
-        dropdownColor: _Palette.cardGlassLight,
-        borderRadius: BorderRadius.circular(14),
-        icon: const Icon(
-          Icons.keyboard_arrow_down_rounded,
-          color: _Palette.textSecondary,
-        ),
-        hint: Text(
-          hint,
-          style: const TextStyle(color: _Palette.textMuted, fontSize: 15),
-        ),
-        style: const TextStyle(color: _Palette.textPrimary, fontSize: 15),
-        items: items,
-        onChanged: disabled ? null : onChanged,
-      ),
-    );
-  }
-}
-
-class _FormField extends StatelessWidget {
-  const _FormField({
-    required this.label,
-    required this.icon,
-    required this.child,
-  });
-  final String label;
-  final IconData icon;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: _Palette.neonViolet.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, size: 18, color: _Palette.neonViolet),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 72,
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: _Palette.textSecondary,
-              ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(child: child),
-        ],
-      ),
-    );
-  }
-}
-
-class _SaveButton extends StatelessWidget {
-  const _SaveButton({required this.isSaving, required this.onSave});
-  final bool isSaving;
-  final VoidCallback onSave;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 56,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          gradient: LinearGradient(
-            colors: isSaving
-                ? const [Color(0xFF4B4870), Color(0xFF4B4870)]
-                : const [_Palette.neonViolet, _Palette.neonCyan],
-          ),
-          boxShadow: isSaving
-              ? []
-              : [
-                  BoxShadow(
-                    color: _Palette.neonViolet.withValues(alpha: 0.45),
-                    blurRadius: 22,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(18),
-            onTap: isSaving ? null : onSave,
-            child: Center(
-              child: isSaving
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.check_circle_rounded,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                        SizedBox(width: 8),
-                        Text(
-                          'Save Changes',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                      ],
-                    ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

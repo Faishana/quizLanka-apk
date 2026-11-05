@@ -2,22 +2,85 @@
 
 import 'dart:convert';
 import 'dart:ui';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:quiz_lanka/Registre.dart';
 import 'package:quiz_lanka/config/api_config.dart';
-import 'package:quiz_lanka/forgot_password_screen.dart';
 import 'package:quiz_lanka/main_navigation.dart';
+import 'package:quiz_lanka/user_onboarding_screen.dart'
+    show UserOnboardingScreen;
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ============================================================
-// TOKEN STORAGE — unchanged
+// USER MODEL
+// ============================================================
+class User {
+  final int id;
+  final String name;
+  final String email;
+  final String? userCategory;
+  final int? gradeId;
+  final String? school;
+  final String? district;
+  final String? alStream;
+  final bool needsOnboarding;
+  final String? avatarUrl;
+
+  User({
+    required this.id,
+    required this.name,
+    required this.email,
+    this.userCategory,
+    this.gradeId,
+    this.school,
+    this.district,
+    this.alStream,
+    this.needsOnboarding = false,
+    this.avatarUrl,
+  });
+
+  factory User.fromJson(Map<String, dynamic> json) {
+    return User(
+      id: json['id'] is int ? json['id'] : int.tryParse('${json['id']}') ?? 0,
+      name: (json['name'] ?? '').toString(),
+      email: (json['email'] ?? '').toString(),
+      userCategory: json['user_category']?.toString(),
+      gradeId: json['grade_id'] == null
+          ? null
+          : int.tryParse('${json['grade_id']}'),
+      school: json['school']?.toString(),
+      district: json['district']?.toString(),
+      alStream: json['al_stream']?.toString(),
+      needsOnboarding: json['needs_onboarding'] == true,
+      avatarUrl: json['avatar_url']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'email': email,
+    'user_category': userCategory,
+    'grade_id': gradeId,
+    'school': school,
+    'district': district,
+    'al_stream': alStream,
+    'needs_onboarding': needsOnboarding,
+    'avatar_url': avatarUrl,
+  };
+}
+
+// ============================================================
+// TOKEN STORAGE
 // ============================================================
 class TokenStorage {
+  TokenStorage._();
+
   static const String _tokenKey = 'auth_token';
-  static const String _userKey = 'user_data';
+  static const String _userKey = 'auth_user';
 
   static Future<void> saveToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
@@ -29,22 +92,28 @@ class TokenStorage {
     return prefs.getString(_tokenKey);
   }
 
-  static Future<void> saveUser(Map<String, dynamic> userData) async {
+  // CHECK TOKEN
+  static Future<bool> hasToken() async {
+    final token = await getToken();
+    return token != null && token.isNotEmpty;
+  }
+
+  static Future<void> saveUser(Map<String, dynamic> userJson) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_userKey, jsonEncode(userData));
+    await prefs.setString(_userKey, jsonEncode(userJson));
   }
 
   static Future<Map<String, dynamic>?> getUser() async {
     final prefs = await SharedPreferences.getInstance();
-    final userString = prefs.getString(_userKey);
-    if (userString != null) {
-      try {
-        return jsonDecode(userString) as Map<String, dynamic>;
-      } catch (e) {
-        return null;
-      }
+    final raw = prefs.getString(_userKey);
+
+    if (raw == null || raw.isEmpty) return null;
+
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
     }
-    return null;
   }
 
   static Future<void> clearAll() async {
@@ -52,157 +121,37 @@ class TokenStorage {
     await prefs.remove(_tokenKey);
     await prefs.remove(_userKey);
   }
-
-  static Future<bool> hasToken() async {
-    final token = await getToken();
-    return token != null && token.isNotEmpty;
-  }
 }
 
 // ============================================================
-// USER MODEL — updated with userCategory + alStream
-// ============================================================
-class User {
-  final int? id;
-  final String? name;
-  final String? email;
-  final String? userCategory; // 'Student' | 'Government Exam Candidate'
-  final int? gradeId;
-  final String? school;
-  final String? district;
-  final String? alStream; // 👈 NEW
-  final String? role;
-
-  User({
-    this.id,
-    this.name,
-    this.email,
-    this.userCategory,
-    this.gradeId,
-    this.school,
-    this.district,
-    this.alStream, // 👈 NEW
-    this.role,
-  });
-
-  factory User.fromJson(Map<String, dynamic> json) {
-    // `grade_id` may come as a top-level field OR nested under `grade.id`
-    // (backend returns both shapes depending on the endpoint).
-    final nestedGrade = json['grade'];
-    final gradeIdFromNested = (nestedGrade is Map && nestedGrade['id'] is int)
-        ? nestedGrade['id'] as int
-        : null;
-
-    return User(
-      id: json['id'] is int ? json['id'] as int : null,
-      name: json['name'] as String?,
-      email: json['email'] as String?,
-      userCategory: json['user_category'] as String?,
-      gradeId: (json['grade_id'] is int)
-          ? json['grade_id'] as int
-          : gradeIdFromNested,
-      school: json['school'] as String?,
-      district: json['district'] as String?,
-      alStream: json['al_stream'] as String?, // 👈 NEW
-      role: json['role'] as String?,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'name': name,
-      'email': email,
-      'user_category': userCategory,
-      'grade_id': gradeId,
-      'school': school,
-      'district': district,
-      'al_stream': alStream, // 👈 NEW
-      'role': role,
-    };
-  }
-
-  bool get isStudent => userCategory == 'Student';
-  bool get isGovernmentExamCandidate =>
-      userCategory == 'Government Exam Candidate';
-}
-
-// ============================================================
-// AUTH SERVICE — register updated for category + nullable fields + alStream
+// AUTH SERVICE
 // ============================================================
 class AuthService {
+  AuthService._();
+  static final AuthService _instance = AuthService._();
+  factory AuthService() => _instance;
+
   final http.Client _client = http.Client();
 
-  Future<Map<String, dynamic>> login(String email, String password) async {
-    try {
-      final response = await _client.post(
-        Uri.parse('${ApiConfig.baseUrl}${ApiConfig.login}'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: jsonEncode({'email': email, 'password': password}),
-      );
-
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode == 200 && data['success'] == true) {
-        await TokenStorage.saveToken(data['token']);
-        await TokenStorage.saveUser(data['user']);
-        final user = User.fromJson(data['user']);
-        return {'success': true, 'user': user, 'token': data['token']};
-      } else if (response.statusCode == 422) {
-        final errors = data['errors'] ?? {};
-        String errorMessage = 'Validation failed';
-        if (errors.isNotEmpty) {
-          errorMessage = errors.values.first.first;
-        }
-        return {'success': false, 'message': errorMessage};
-      } else {
-        return {'success': false, 'message': data['message'] ?? 'Login failed'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
-    }
-  }
-
-  /// Registers a new user.
-  ///
-  /// [gradeId], [school], [district], [alStream] are nullable because
-  /// Government Exam Candidates don't have a grade/school and non-A/L
-  /// students don't have a stream. They are omitted from the payload
-  /// when null/empty so the backend's `nullable` validation passes cleanly.
+  // ── REGISTER ────────────────────────────────────────────────
   Future<Map<String, dynamic>> register(
     String name,
     String email,
     String password,
     String passwordConfirmation,
-    int? gradeId,
-    String? school,
-    String? district,
-    String userCategory,
-    String? alStream, // 👈 NEW
   ) async {
     try {
       final url = '${ApiConfig.baseUrl}${ApiConfig.register}';
 
-      final requestBody = <String, dynamic>{
+      final requestBody = {
         'name': name,
         'email': email,
         'password': password,
         'password_confirmation': passwordConfirmation,
-        'user_category': userCategory,
-        if (gradeId != null) 'grade_id': gradeId,
-        if (school != null && school.trim().isNotEmpty) 'school': school.trim(),
-        if (district != null && district.trim().isNotEmpty)
-          'district': district.trim(),
-        if (alStream != null && alStream.isNotEmpty)
-          'al_stream': alStream, // 👈 NEW
       };
 
-      debugPrint('==============================');
-      debugPrint('REGISTER URL : $url');
-      debugPrint('REQUEST BODY : ${jsonEncode(requestBody)}');
+      debugPrint('REGISTER URL: $url');
+      debugPrint('REQUEST BODY: ${jsonEncode(requestBody)}');
 
       final response = await _client.post(
         Uri.parse(url),
@@ -213,39 +162,33 @@ class AuthService {
         body: jsonEncode(requestBody),
       );
 
-      debugPrint('STATUS CODE : ${response.statusCode}');
-      debugPrint('RESPONSE : ${response.body}');
-      debugPrint('==============================');
+      debugPrint('STATUS CODE: ${response.statusCode}');
+      debugPrint('RESPONSE: ${response.body}');
 
       final data = jsonDecode(response.body);
 
       if ((response.statusCode == 200 || response.statusCode == 201) &&
           data['success'] == true) {
         await TokenStorage.saveToken(data['token']);
-        await TokenStorage.saveUser(data['user']);
+        await TokenStorage.saveUser(Map<String, dynamic>.from(data['user']));
 
         return {
           'success': true,
-          'user': User.fromJson(data['user']),
+          'user': User.fromJson(Map<String, dynamic>.from(data['user'])),
           'token': data['token'],
+          'needs_onboarding': data['needs_onboarding'] == true,
         };
       }
 
       if (response.statusCode == 422) {
         final errors = data['errors'];
-
-        if (errors != null && errors is Map && errors.isNotEmpty) {
+        if (errors is Map && errors.isNotEmpty) {
           final firstError = errors.values.first;
           final message = firstError is List && firstError.isNotEmpty
               ? firstError.first.toString()
               : firstError.toString();
           return {'success': false, 'message': message};
         }
-
-        return {
-          'success': false,
-          'message': data['message'] ?? 'Validation failed',
-        };
       }
 
       return {
@@ -253,114 +196,235 @@ class AuthService {
         'message': data['message'] ?? 'Registration failed',
       };
     } catch (e, s) {
-      debugPrint("REGISTER ERROR : $e");
+      debugPrint('REGISTER ERROR: $e');
       debugPrint(s.toString());
-
       return {'success': false, 'message': e.toString()};
     }
   }
 
-  Future<Map<String, dynamic>> getCurrentUser() async {
+  // ── LOGIN ───────────────────────────────────────────────────
+  Future<Map<String, dynamic>> login(String email, String password) async {
+    try {
+      final url = '${ApiConfig.baseUrl}${ApiConfig.login}';
+
+      final response = await _client.post(
+        Uri.parse(url),
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'email': email, 'password': password}),
+      );
+
+      debugPrint('LOGIN STATUS: ${response.statusCode}');
+      debugPrint('LOGIN RESPONSE: ${response.body}');
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        await TokenStorage.saveToken(data['token']);
+        await TokenStorage.saveUser(Map<String, dynamic>.from(data['user']));
+
+        final user = User.fromJson(Map<String, dynamic>.from(data['user']));
+
+        return {
+          'success': true,
+          'user': user,
+          'token': data['token'],
+          'needs_onboarding':
+              data['needs_onboarding'] == true || user.needsOnboarding,
+        };
+      }
+
+      if (response.statusCode == 422) {
+        final errors = data['errors'];
+        if (errors is Map && errors.isNotEmpty) {
+          final firstError = errors.values.first;
+          final message = firstError is List && firstError.isNotEmpty
+              ? firstError.first.toString()
+              : firstError.toString();
+          return {'success': false, 'message': message};
+        }
+      }
+
+      return {'success': false, 'message': data['message'] ?? 'Login failed'};
+    } catch (e) {
+      debugPrint('LOGIN ERROR: $e');
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  // ── COMPLETE ONBOARDING ─────────────────────────────────────
+  Future<Map<String, dynamic>> completeOnboarding({
+    required String userCategory,
+    int? gradeId,
+    String? school,
+    required String district,
+    String? alStream,
+  }) async {
     try {
       final token = await TokenStorage.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'No token found'};
+
+      if (token == null || token.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Authentication token not found. Please login again.',
+        };
       }
 
-      final userData = await TokenStorage.getUser();
-      if (userData != null) {
-        return {'success': true, 'user': User.fromJson(userData)};
+      final requestBody = <String, dynamic>{
+        'user_category': userCategory,
+        'district': district,
+        if (gradeId != null) 'grade_id': gradeId,
+        if (school != null && school.trim().isNotEmpty) 'school': school.trim(),
+        if (alStream != null && alStream.isNotEmpty) 'al_stream': alStream,
+      };
+
+      final url = '${ApiConfig.baseUrl}${ApiConfig.completeOnboarding}';
+
+      debugPrint('ONBOARDING URL: $url');
+      debugPrint('ONBOARDING BODY: ${jsonEncode(requestBody)}');
+
+      final response = await _client.post(
+        Uri.parse(url),
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(requestBody),
+      );
+
+      debugPrint('ONBOARDING STATUS: ${response.statusCode}');
+      debugPrint('ONBOARDING RESPONSE: ${response.body}');
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        if (data['user'] is Map) {
+          await TokenStorage.saveUser(Map<String, dynamic>.from(data['user']));
+        }
+        return {
+          'success': true,
+          'user': data['user'],
+          'message': data['message'] ?? 'Onboarding completed.',
+        };
       }
 
-      return {'success': false, 'message': 'No user data found'};
+      if (response.statusCode == 422) {
+        final errors = data['errors'];
+        if (errors is Map && errors.isNotEmpty) {
+          final firstError = errors.values.first;
+          final message = firstError is List && firstError.isNotEmpty
+              ? firstError.first.toString()
+              : firstError.toString();
+          return {'success': false, 'message': message};
+        }
+      }
+
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Onboarding failed.',
+      };
     } catch (e) {
+      debugPrint('ONBOARDING ERROR: $e');
       return {'success': false, 'message': 'Network error: $e'};
     }
   }
 
+  // ── LOGOUT ──────────────────────────────────────────────────
   Future<void> logout() async {
     try {
       final token = await TokenStorage.getToken();
-      if (token != null) {
+      if (token != null && token.isNotEmpty) {
         await _client.post(
           Uri.parse('${ApiConfig.baseUrl}${ApiConfig.logout}'),
-          headers: ApiConfig.getHeaders(token),
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
         );
       }
     } catch (e) {
-      // Ignore network errors on logout
+      debugPrint('LOGOUT ERROR: $e');
     } finally {
       await TokenStorage.clearAll();
     }
   }
 
-  void dispose() {
-    _client.close();
+  // ── FETCH PROFILE ───────────────────────────────────────────
+  Future<User?> fetchProfile() async {
+    try {
+      final token = await TokenStorage.getToken();
+      if (token == null || token.isEmpty) return null;
+
+      final response = await _client.get(
+        Uri.parse('${ApiConfig.baseUrl}${ApiConfig.me}'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['user'] is Map) {
+          final user = User.fromJson(Map<String, dynamic>.from(data['user']));
+          await TokenStorage.saveUser(user.toJson());
+          return user;
+        }
+      }
+      return null;
+    } catch (e) {
+      debugPrint('FETCH PROFILE ERROR: $e');
+      return null;
+    }
   }
 }
 
 // ============================================================
-// AUTH PROVIDER — register updated with alStream
+// AUTH PROVIDER
 // ============================================================
 class AuthProvider extends ChangeNotifier {
   final AuthService _authService = AuthService();
 
   User? _user;
   bool _isLoading = false;
+  bool _isInitialized = false;
   String? _error;
 
   User? get user => _user;
   bool get isLoading => _isLoading;
+  bool get isInitialized => _isInitialized;
   bool get isAuthenticated => _user != null;
   String? get error => _error;
-
-  void setUser(User? user) {
-    _user = user;
-    notifyListeners();
-  }
 
   void clearError() {
     _error = null;
     notifyListeners();
   }
 
-  Future<bool> login(String email, String password) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      final result = await _authService.login(email, password);
-
-      if (result['success']) {
-        _user = result['user'];
-        notifyListeners();
-        return true;
-      } else {
-        _error = result['message'];
-        notifyListeners();
-        return false;
-      }
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-      return false;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
+  // ── INIT ────────────────────────────────────────────────────
+  Future<void> init() async {
+    final storedUser = await TokenStorage.getUser();
+    if (storedUser != null) {
+      _user = User.fromJson(storedUser);
     }
+    final token = await TokenStorage.getToken();
+    if (token != null && token.isNotEmpty) {
+      final fresh = await _authService.fetchProfile();
+      if (fresh != null) _user = fresh;
+    }
+    _isInitialized = true;
+    notifyListeners();
   }
 
+  // ── REGISTER ────────────────────────────────────────────────
   Future<bool> register(
     String name,
     String email,
     String password,
     String passwordConfirmation,
-    int? gradeId, // nullable
-    String? school, // nullable
-    String? district, // nullable
-    String selectedUserCategory,
-    String? alStream, // 👈 NEW
   ) async {
     _isLoading = true;
     _error = null;
@@ -372,15 +436,10 @@ class AuthProvider extends ChangeNotifier {
         email,
         password,
         passwordConfirmation,
-        gradeId,
-        school,
-        district,
-        selectedUserCategory,
-        alStream, // 👈 forwarded
       );
 
-      if (result['success']) {
-        _user = result['user'];
+      if (result['success'] == true) {
+        _user = result['user'] as User?;
         notifyListeners();
         return true;
       } else {
@@ -398,47 +457,96 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> checkAuthStatus() async {
+  // ── LOGIN ───────────────────────────────────────────────────
+  Future<bool> login(String email, String password) async {
     _isLoading = true;
+    _error = null;
     notifyListeners();
 
     try {
-      final result = await _authService.getCurrentUser();
+      final result = await _authService.login(email, password);
 
-      if (result['success']) {
-        _user = result['user'];
+      if (result['success'] == true) {
+        _user = result['user'] as User?;
+        notifyListeners();
+        return true;
       } else {
-        _user = null;
+        _error = result['message'];
+        notifyListeners();
+        return false;
       }
-    } catch (_) {
-      _user = null;
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
-
-    _isLoading = false;
-    notifyListeners();
   }
 
+  // ── COMPLETE ONBOARDING ─────────────────────────────────────
+  Future<bool> completeOnboarding({
+    required String userCategory,
+    int? gradeId,
+    String? school,
+    required String district,
+    String? alStream,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final result = await _authService.completeOnboarding(
+        userCategory: userCategory,
+        gradeId: gradeId,
+        school: school,
+        district: district,
+        alStream: alStream,
+      );
+
+      if (result['success'] == true) {
+        final userData = result['user'];
+        if (userData is Map) {
+          _user = User.fromJson(Map<String, dynamic>.from(userData));
+        } else {
+          // Fallback: reload from storage in case response lacks user
+          final stored = await TokenStorage.getUser();
+          if (stored != null) {
+            _user = User.fromJson(stored);
+          }
+        }
+        notifyListeners();
+        return true;
+      }
+
+      _error = result['message'];
+      return false;
+    } catch (e) {
+      _error = e.toString();
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // ── LOGOUT ──────────────────────────────────────────────────
   Future<void> logout() async {
     _isLoading = true;
     notifyListeners();
 
     await _authService.logout();
-
     _user = null;
+    _error = null;
     _isLoading = false;
-
     notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    _authService.dispose();
-    super.dispose();
   }
 }
 
 // ============================================================
-// DESIGN TOKENS — "Aurora Glass" theme (contrast-tuned)
+// DESIGN TOKENS (Login UI)
 // ============================================================
 class _LoginTokens {
   _LoginTokens._();
@@ -460,7 +568,7 @@ class _LoginTokens {
 }
 
 // ============================================================
-// LOGIN SCREEN — unchanged
+// LOGIN SCREEN
 // ============================================================
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -476,9 +584,8 @@ class _LoginScreenState extends State<LoginScreen>
   final _passwordController = TextEditingController();
 
   bool _obscurePassword = true;
-  bool _rememberMe = true;
-  bool _isCheckingAuth = true;
-  AutovalidateMode _autovalidateMode = AutovalidateMode.disabled;
+  bool _isLoading = false;
+  bool _rememberMe = false;
 
   late AnimationController _animController;
   late Animation<double> _cardSlide;
@@ -487,7 +594,6 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   void initState() {
     super.initState();
-
     _animController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
@@ -496,48 +602,69 @@ class _LoginScreenState extends State<LoginScreen>
       CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
     );
     _cardFade = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
-
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final auth = context.read<AuthProvider>();
-      await auth.checkAuthStatus();
-
-      if (mounted && auth.isAuthenticated) {
-        _goToDashboard();
-        return;
-      }
-
-      setState(() => _isCheckingAuth = false);
-      _animController.forward();
-    });
-  }
-
-  void _goToDashboard() {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const MainNavigation()),
-    );
-  }
-
-  Future<void> _handleLogin(AuthProvider auth) async {
-    setState(() => _autovalidateMode = AutovalidateMode.onUserInteraction);
-
-    if (!_formKey.currentState!.validate()) return;
-    auth.clearError();
-
-    final success = await auth.login(
-      _emailController.text.trim(),
-      _passwordController.text,
-    );
-
-    if (success && mounted) _goToDashboard();
+    _animController.forward();
   }
 
   @override
   void dispose() {
-    _animController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _animController.dispose();
     super.dispose();
+  }
+
+  // ── HANDLE LOGIN ────────────────────────────────────────────
+  Future<void> _handleLogin() async {
+    FocusScope.of(context).unfocus();
+
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final auth = context.read<AuthProvider>();
+
+      final success = await auth.login(
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
+      );
+
+      setState(() => _isLoading = false);
+
+      if (success && mounted) {
+        _goToNextScreen();
+      } else if (mounted) {
+        final err = context.read<AuthProvider>().error;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(err ?? 'Login failed. Please try again.'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  void _goToNextScreen() {
+    final auth = context.read<AuthProvider>();
+
+    if (auth.user?.needsOnboarding == true) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const UserOnboardingScreen()),
+      );
+    } else {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const MainNavigation()),
+      );
+    }
   }
 
   @override
@@ -545,78 +672,70 @@ class _LoginScreenState extends State<LoginScreen>
     return Scaffold(
       resizeToAvoidBottomInset: true,
       backgroundColor: _LoginTokens.backgroundGradient.first,
-      body: Consumer<AuthProvider>(
-        builder: (context, auth, _) {
-          if (_isCheckingAuth) {
-            return const _LoadingScreen();
-          }
-
-          return Stack(
-            children: [
-              Positioned.fill(
-                child: Image.asset(
-                  'assets/login_bg.png',
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, error, stackTrace) => Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: _LoginTokens.backgroundGradient,
-                      ),
-                    ),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Image.asset(
+              'assets/login_bg.png',
+              fit: BoxFit.cover,
+              errorBuilder: (_, error, stackTrace) => Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: _LoginTokens.backgroundGradient,
                   ),
                 ),
               ),
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.55),
-                        Colors.black.withValues(alpha: 0.25),
-                        Colors.black.withValues(alpha: 0.65),
-                      ],
-                      stops: const [0.0, 0.35, 1.0],
-                    ),
-                  ),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.55),
+                    Colors.black.withValues(alpha: 0.25),
+                    Colors.black.withValues(alpha: 0.65),
+                  ],
+                  stops: const [0.0, 0.35, 1.0],
                 ),
               ),
-              SafeArea(
-                child: SingleChildScrollView(
-                  physics: const ClampingScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: AnimatedBuilder(
-                    animation: _animController,
-                    builder: (_, child) => Opacity(
-                      opacity: _cardFade.value,
-                      child: Transform.translate(
-                        offset: Offset(0, _cardSlide.value),
-                        child: child,
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 28),
-                        const _BrandMark(),
-                        const SizedBox(height: 32),
-                        _buildFormCard(auth),
-                        const SizedBox(height: 24),
-                      ],
-                    ),
+            ),
+          ),
+          SafeArea(
+            child: SingleChildScrollView(
+              physics: const ClampingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: AnimatedBuilder(
+                animation: _animController,
+                builder: (_, child) => Opacity(
+                  opacity: _cardFade.value,
+                  child: Transform.translate(
+                    offset: Offset(0, _cardSlide.value),
+                    child: child,
                   ),
                 ),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 24),
+                    const _BrandMark(),
+                    const SizedBox(height: 32),
+                    _buildFormCard(),
+                    const SizedBox(height: 24),
+                  ],
+                ),
               ),
-            ],
-          );
-        },
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildFormCard(AuthProvider auth) {
+  Widget _buildFormCard() {
     return ClipRRect(
       borderRadius: BorderRadius.circular(_LoginTokens.cardRadius),
       child: BackdropFilter(
@@ -638,12 +757,11 @@ class _LoginScreenState extends State<LoginScreen>
           ),
           child: Form(
             key: _formKey,
-            autovalidateMode: _autovalidateMode,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'Welcome Back!',
+                  'Welcome Back',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 26,
@@ -654,7 +772,7 @@ class _LoginScreenState extends State<LoginScreen>
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Login to continue your AI learning journey.',
+                  'Login to continue your learning journey',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13.5,
@@ -662,14 +780,7 @@ class _LoginScreenState extends State<LoginScreen>
                     height: 1.4,
                   ),
                 ),
-                const SizedBox(height: 22),
-
-                if (auth.error != null)
-                  _ErrorBanner(
-                    message: auth.error!,
-                    onDismiss: auth.clearError,
-                  ),
-
+                const SizedBox(height: 24),
                 _GlassTextField(
                   controller: _emailController,
                   hint: 'Email Address',
@@ -681,8 +792,7 @@ class _LoginScreenState extends State<LoginScreen>
                     return null;
                   },
                 ),
-                const SizedBox(height: 14),
-
+                const SizedBox(height: 12),
                 _GlassTextField(
                   controller: _passwordController,
                   hint: 'Password',
@@ -700,146 +810,48 @@ class _LoginScreenState extends State<LoginScreen>
                         setState(() => _obscurePassword = !_obscurePassword),
                   ),
                   validator: (v) {
-                    if (v == null || v.isEmpty) return 'Enter your password';
-                    if (v.length < 6) return 'Minimum 6 characters';
+                    if (v == null || v.isEmpty) {
+                      return 'Enter your password';
+                    }
+                    if (v.length < 8) return 'Minimum 8 characters';
                     return null;
                   },
                 ),
-                const SizedBox(height: 14),
-
-                Row(
-                  children: [
-                    GestureDetector(
-                      onTap: () => setState(() => _rememberMe = !_rememberMe),
-                      child: Row(
-                        children: [
-                          AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            width: 20,
-                            height: 20,
-                            decoration: BoxDecoration(
-                              color: _rememberMe
-                                  ? _LoginTokens.violet
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(5),
-                              border: Border.all(
-                                color: _rememberMe
-                                    ? _LoginTokens.violet
-                                    : _LoginTokens.textSecondary,
-                                width: 1.5,
-                              ),
-                            ),
-                            child: _rememberMe
-                                ? const Icon(
-                                    Icons.check,
-                                    color: Colors.white,
-                                    size: 13,
-                                  )
-                                : null,
-                          ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Remember me',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: _LoginTokens.textSecondary,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Spacer(),
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const ForgotPasswordScreen(),
-                          ),
-                        );
-                      },
-                      child: const Text(
-                        'Forgot Password?',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: _LoginTokens.cyan,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                const SizedBox(height: 12),
+                _buildRememberMe(),
                 const SizedBox(height: 22),
-
                 _GradientButton(
                   label: 'Login',
-                  isLoading: auth.isLoading,
-                  onTap: () => _handleLogin(auth),
+                  isLoading: _isLoading,
+                  onTap: _handleLogin,
                 ),
-                const SizedBox(height: 20),
-
-                _GlassActionTile(
-                  icon: Icons.person_add_outlined,
-                  title: 'Create New Account',
-                  subtitle: 'Join QuizLanka AI today!',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const RegisterScreen()),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                RichText(
-                  textAlign: TextAlign.center,
-                  text: TextSpan(
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      color: _LoginTokens.textSecondary,
-                      height: 1.5,
-                    ),
-                    children: [
-                      const TextSpan(text: 'By continuing, you agree to our '),
-                      TextSpan(
-                        text: 'Terms of Service',
-                        style: const TextStyle(
-                          color: _LoginTokens.cyan,
-                          fontWeight: FontWeight.w700,
+                const SizedBox(height: 18),
+                Center(
+                  child: RichText(
+                    text: TextSpan(
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: _LoginTokens.textSecondary,
+                      ),
+                      children: [
+                        const TextSpan(text: "Don't have an account? "),
+                        TextSpan(
+                          text: 'Register',
+                          style: const TextStyle(
+                            color: _LoginTokens.cyan,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          recognizer: TapGestureRecognizer()
+                            ..onTap = () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const RegisterScreen(),
+                              ),
+                            ),
                         ),
-                        recognizer: TapGestureRecognizer()..onTap = () {},
-                      ),
-                      const TextSpan(text: ' and '),
-                      TextSpan(
-                        text: 'Privacy Policy',
-                        style: const TextStyle(
-                          color: _LoginTokens.cyan,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        recognizer: TapGestureRecognizer()..onTap = () {},
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.verified_user_outlined,
-                      color: _LoginTokens.violet.withValues(alpha: 0.95),
-                      size: 14,
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      'Your data is secure with us',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: _LoginTokens.violet.withValues(alpha: 0.95),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
@@ -848,62 +860,95 @@ class _LoginScreenState extends State<LoginScreen>
       ),
     );
   }
-}
 
-// ============================================================
-// PRIVATE, REUSABLE WIDGETS — unchanged
-// ============================================================
-
-class _LoadingScreen extends StatelessWidget {
-  const _LoadingScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: _LoginTokens.backgroundGradient,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+  Widget _buildRememberMe() {
+    return Row(
+      children: [
+        GestureDetector(
+          onTap: () => setState(() => _rememberMe = !_rememberMe),
+          child: Row(
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: _rememberMe ? _LoginTokens.violet : Colors.transparent,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: _rememberMe
+                        ? _LoginTokens.violet
+                        : _LoginTokens.textSecondary,
+                    width: 1.4,
+                  ),
+                ),
+                child: _rememberMe
+                    ? const Icon(Icons.check, size: 12, color: Colors.white)
+                    : null,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Remember me',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: _LoginTokens.textSecondary,
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
-      child: const Center(
-        child: CircularProgressIndicator(color: Colors.white),
-      ),
+        const Spacer(),
+        GestureDetector(
+          onTap: () {},
+          child: const Text(
+            'Forgot Password?',
+            style: TextStyle(
+              fontSize: 12.5,
+              color: _LoginTokens.cyan,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
+
+// ============================================================
+// PRIVATE WIDGETS
+// ============================================================
 
 class _BrandMark extends StatelessWidget {
   const _BrandMark();
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Container(
-          width: 64,
-          height: 64,
+          width: 44,
+          height: 44,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
             gradient: const LinearGradient(
               colors: [_LoginTokens.violet, _LoginTokens.cyan],
             ),
+            borderRadius: BorderRadius.circular(13),
             boxShadow: [
               BoxShadow(
-                color: _LoginTokens.violet.withValues(alpha: 0.5),
-                blurRadius: 26,
-                spreadRadius: 2,
+                color: _LoginTokens.violet.withValues(alpha: 0.45),
+                blurRadius: 18,
+                spreadRadius: 1,
               ),
             ],
           ),
           child: const Icon(
             Icons.psychology_rounded,
             color: Colors.white,
-            size: 34,
+            size: 26,
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(width: 12),
         RichText(
           text: const TextSpan(
             children: [
@@ -912,8 +957,8 @@ class _BrandMark extends StatelessWidget {
                 style: TextStyle(
                   color: _LoginTokens.textPrimary,
                   fontWeight: FontWeight.w900,
-                  fontSize: 22,
-                  shadows: [Shadow(color: Colors.black45, blurRadius: 12)],
+                  fontSize: 20,
+                  shadows: [Shadow(color: Colors.black45, blurRadius: 10)],
                 ),
               ),
               TextSpan(
@@ -921,67 +966,14 @@ class _BrandMark extends StatelessWidget {
                 style: TextStyle(
                   color: _LoginTokens.violet,
                   fontWeight: FontWeight.w900,
-                  fontSize: 22,
-                  shadows: [Shadow(color: Colors.black45, blurRadius: 12)],
+                  fontSize: 20,
+                  shadows: [Shadow(color: Colors.black45, blurRadius: 10)],
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 4),
-        const Text(
-          'Learn Smart. Rank Higher.',
-          style: TextStyle(
-            color: _LoginTokens.textSecondary,
-            fontSize: 12.5,
-            fontWeight: FontWeight.w500,
-            shadows: [Shadow(color: Colors.black45, blurRadius: 8)],
-          ),
-        ),
       ],
-    );
-  }
-}
-
-class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({required this.message, required this.onDismiss});
-  final String message;
-  final VoidCallback onDismiss;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: _LoginTokens.danger.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _LoginTokens.danger.withValues(alpha: 0.45)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, color: _LoginTokens.danger, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(
-                color: _LoginTokens.danger,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          GestureDetector(
-            onTap: onDismiss,
-            child: Icon(
-              Icons.close,
-              color: _LoginTokens.danger.withValues(alpha: 0.8),
-              size: 18,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -1070,131 +1062,81 @@ class _GradientButton extends StatelessWidget {
     required this.label,
     required this.isLoading,
     required this.onTap,
+    this.enabled = true,
   });
 
   final String label;
   final bool isLoading;
   final VoidCallback onTap;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
+    final canTap = enabled && !isLoading;
+
     return GestureDetector(
-      onTap: isLoading ? null : onTap,
-      child: Container(
+      onTap: canTap ? onTap : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
         height: 54,
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [_LoginTokens.violet, _LoginTokens.cyan],
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-          ),
+          gradient: enabled
+              ? const LinearGradient(
+                  colors: [_LoginTokens.violet, _LoginTokens.cyan],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                )
+              : LinearGradient(
+                  colors: [
+                    Colors.white.withValues(alpha: 0.14),
+                    Colors.white.withValues(alpha: 0.10),
+                  ],
+                ),
           borderRadius: BorderRadius.circular(27),
-          boxShadow: [
-            BoxShadow(
-              color: _LoginTokens.violet.withValues(alpha: 0.45),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (isLoading)
-              const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2.5,
-                ),
-              )
-            else ...[
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.3,
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Icon(Icons.chevron_right, color: Colors.white, size: 22),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GlassActionTile extends StatelessWidget {
-  const _GlassActionTile({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: _LoginTokens.violet.withValues(alpha: 0.25),
-                borderRadius: BorderRadius.circular(11),
-              ),
-              child: Icon(icon, color: _LoginTokens.violet, size: 22),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: _LoginTokens.textPrimary,
-                    ),
+          boxShadow: enabled
+              ? [
+                  BoxShadow(
+                    color: _LoginTokens.violet.withValues(alpha: 0.45),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      color: _LoginTokens.textSecondary,
-                      fontWeight: FontWeight.w500,
-                    ),
+                ]
+              : [],
+        ),
+        child: Center(
+          child: isLoading
+              ? const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2.5,
                   ),
-                ],
-              ),
-            ),
-            Icon(
-              Icons.chevron_right,
-              color: _LoginTokens.textSecondary.withValues(alpha: 0.85),
-              size: 20,
-            ),
-          ],
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: enabled
+                            ? Colors.white
+                            : _LoginTokens.textSecondary,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.chevron_right,
+                      color: enabled
+                          ? Colors.white
+                          : _LoginTokens.textSecondary,
+                      size: 22,
+                    ),
+                  ],
+                ),
         ),
       ),
     );

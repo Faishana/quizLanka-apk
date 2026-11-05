@@ -649,7 +649,7 @@ class _ErrorView extends StatelessWidget {
 
 // 6.2 White card wrapper
 class _SurfaceCard extends StatelessWidget {
-  const _SurfaceCard({required this.child, this.padding, this.margin});
+  const _SurfaceCard({required this.child, this.padding}) : margin = null;
 
   final Widget child;
   final EdgeInsetsGeometry? padding;

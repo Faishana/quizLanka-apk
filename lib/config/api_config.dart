@@ -17,6 +17,7 @@ class ApiConfig {
   static const String register = '/student/register';
   static const String logout = '/student/logout';
   static const String me = '/student/me';
+  static const String completeOnboarding = '/student/complete-onboarding';
 
   // ============================
   // Public

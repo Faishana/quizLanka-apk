@@ -30,7 +30,6 @@ class _LightTheme {
 
   static const Color primaryBlue = Color(0xFF3D5CFF);
   static const Color accentCyan = Color(0xFF2FB6C9);
-  static const Color success = Color(0xFF2FB380);
   static const Color danger = Color(0xFFE05A5A);
 
   static const Color textPrimary = Color(0xFF1B2440);

@@ -1,3 +1,11 @@
+// ============================
+// ApiConfig (add these)
+// ============================
+// static const String pastPaperSubjects = '/past-papers/subjects';
+// static const String pastPaperList     = '/past-papers/list';
+// static String pastPaperDetails(int id) => '/past-papers/$id';
+// static String pastPaperSubmit(int id)  => '/past-papers/$id/submit';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -8,6 +16,10 @@ import 'package:quiz_lanka/Login.dart';
 import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/past_paper_quiz_screen.dart';
 
+// ============================================================
+// MODEL
+// ============================================================
+
 class PastPaper {
   final int id;
   final int gradeId;
@@ -16,7 +28,6 @@ class PastPaper {
   final String medium;
   final String title;
   final int paperNumber;
-  final int totalQuestions;
   final int questionsCount;
 
   PastPaper({
@@ -27,21 +38,19 @@ class PastPaper {
     required this.medium,
     required this.title,
     required this.paperNumber,
-    required this.totalQuestions,
     required this.questionsCount,
   });
 
   factory PastPaper.fromJson(Map<String, dynamic> json) {
     return PastPaper(
-      id: json['id'] as int,
-      gradeId: json['grade_id'] as int,
-      subjectId: json['subject_id'] as int,
-      year: json['year'] as int,
-      medium: json['medium'] as String,
+      id: (json['id'] as num).toInt(),
+      gradeId: (json['grade_id'] as num?)?.toInt() ?? 0,
+      subjectId: (json['subject_id'] as num?)?.toInt() ?? 0,
+      year: (json['year'] as num?)?.toInt() ?? 0,
+      medium: json['medium'] as String? ?? 'en',
       title: json['title'] as String? ?? 'Past Paper',
-      paperNumber: json['paper_number'] as int? ?? 1,
-      totalQuestions: json['total_questions'] as int? ?? 0,
-      questionsCount: json['questions_count'] as int? ?? 0,
+      paperNumber: (json['paper_number'] as num?)?.toInt() ?? 1,
+      questionsCount: (json['questions_count'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -54,25 +63,25 @@ class PastPaperListService {
   final http.Client _client = http.Client();
 
   Future<List<PastPaper>> getPastPapers({
-    required String category,
     required int subjectId,
-    required String medium,
+    String? medium,
+    int? year,
   }) async {
     final token = await TokenStorage.getToken();
 
     if (token == null || token.isEmpty) {
-      throw Exception('Authentication token not found.');
+      throw Exception('Authentication token not found. Please login again.');
     }
 
+    final query = <String, String>{'subject_id': subjectId.toString()};
+    if (medium != null && medium.isNotEmpty) query['medium'] = medium;
+    if (year != null) query['year'] = year.toString();
+
     final uri = Uri.parse(
-      '${ApiConfig.baseUrl}${ApiConfig.pastPaperList}'
-      '?category=${Uri.encodeQueryComponent(category)}'
-      '&subject_id=$subjectId'
-      '&medium=${Uri.encodeQueryComponent(medium)}',
-    );
+      '${ApiConfig.baseUrl}${ApiConfig.pastPaperList}',
+    ).replace(queryParameters: query);
 
     http.Response response;
-
     try {
       response = await _client
           .get(uri, headers: ApiConfig.getHeaders(token))
@@ -86,7 +95,6 @@ class PastPaperListService {
     }
 
     Map<String, dynamic> data;
-
     try {
       data = jsonDecode(response.body) as Map<String, dynamic>;
     } on FormatException {
@@ -94,12 +102,18 @@ class PastPaperListService {
     }
 
     debugPrint('Past Paper List Status: ${response.statusCode}');
-    debugPrint('Past Paper List Response: ${response.body}');
+    debugPrint('Past Paper List Body: ${response.body}');
 
     if (response.statusCode == 200 && data['success'] == true) {
-      final list = data['data'];
+      // Backend uses paginate(20) → data is { data: [...], ... }
+      final payload = data['data'];
+      List<dynamic> list;
 
-      if (list == null || list is! List) {
+      if (payload is Map<String, dynamic> && payload['data'] is List) {
+        list = payload['data'] as List;
+      } else if (payload is List) {
+        list = payload;
+      } else {
         throw Exception('Invalid past paper data received from server.');
       }
 
@@ -112,11 +126,14 @@ class PastPaperListService {
       await TokenStorage.clearAll();
       throw Exception('Session expired. Please login again.');
     }
-
+    if (response.statusCode == 403) {
+      throw Exception(
+        data['message'] ?? 'You are not allowed to access past papers.',
+      );
+    }
     if (response.statusCode == 422) {
       throw Exception(data['message'] ?? 'Invalid past paper request.');
     }
-
     if (response.statusCode >= 500) {
       throw Exception('Server error. Please try again later.');
     }
@@ -124,9 +141,7 @@ class PastPaperListService {
     throw Exception(data['message'] ?? 'Failed to load past papers.');
   }
 
-  void dispose() {
-    _client.close();
-  }
+  void dispose() => _client.close();
 }
 
 // ============================================================
@@ -136,15 +151,14 @@ class PastPaperListService {
 class PastPaperListScreen extends StatefulWidget {
   final int subjectId;
   final String subjectName;
-  final String category;
   final String medium;
+  // NOTE: `category` removed — backend infers it from the auth user.
 
   const PastPaperListScreen({
     super.key,
     required this.subjectId,
     required this.subjectName,
-    required this.category,
-    required this.medium,
+    required this.medium, required String category,
   });
 
   @override
@@ -153,18 +167,21 @@ class PastPaperListScreen extends StatefulWidget {
 
 class _PastPaperListScreenState extends State<PastPaperListScreen> {
   final PastPaperListService _service = PastPaperListService();
-
   late Future<List<PastPaper>> _papersFuture;
 
   @override
   void initState() {
     super.initState();
+    _papersFuture = _load();
+  }
 
-    _papersFuture = _service.getPastPapers(
-      category: widget.category,
-      subjectId: widget.subjectId,
-      medium: widget.medium,
-    );
+  Future<List<PastPaper>> _load() => _service.getPastPapers(
+    subjectId: widget.subjectId,
+    medium: widget.medium,
+  );
+
+  void _retry() {
+    setState(() => _papersFuture = _load());
   }
 
   @override
@@ -186,16 +203,6 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
     }
   }
 
-  void _retry() {
-    setState(() {
-      _papersFuture = _service.getPastPapers(
-        category: widget.category,
-        subjectId: widget.subjectId,
-        medium: widget.medium,
-      );
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -204,7 +211,6 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
         child: Column(
           children: [
             _buildTopBar(),
-
             Expanded(
               child: FutureBuilder<List<PastPaper>>(
                 future: _papersFuture,
@@ -223,10 +229,7 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
                   }
 
                   final papers = snapshot.data ?? [];
-
-                  if (papers.isEmpty) {
-                    return _buildEmpty();
-                  }
+                  if (papers.isEmpty) return _buildEmpty();
 
                   return RefreshIndicator(
                     color: const Color(0xFF7C3AED),
@@ -241,9 +244,7 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
                       ),
                       children: [
                         _buildHero(papers.length),
-
                         const SizedBox(height: 24),
-
                         const Text(
                           'Available Past Papers',
                           style: TextStyle(
@@ -252,27 +253,21 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
                             color: Color(0xFF181B34),
                           ),
                         ),
-
                         const SizedBox(height: 6),
-
-                        Text(
+                        const Text(
                           'Choose a paper to start your practice.',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
                             color: Color(0xFF6B7086),
                           ),
                         ),
-
                         const SizedBox(height: 16),
-
                         ...papers.map(
                           (paper) => Padding(
                             padding: const EdgeInsets.only(bottom: 14),
                             child: _PastPaperCard(
                               paper: paper,
-                              onTap: () {
-                                _openPaper(paper);
-                              },
+                              onTap: () => _openPaper(paper),
                             ),
                           ),
                         ),
@@ -310,9 +305,7 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
               ),
             ),
           ),
-
           const SizedBox(width: 14),
-
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -376,9 +369,7 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
               size: 31,
             ),
           ),
-
           const SizedBox(width: 16),
-
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -393,9 +384,7 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-
                 const SizedBox(height: 5),
-
                 Text(
                   _mediumName,
                   style: const TextStyle(
@@ -404,9 +393,7 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-
                 const SizedBox(height: 10),
-
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
@@ -417,7 +404,7 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    '$count Past Papers',
+                    '$count Past Paper${count == 1 ? '' : 's'}',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 10.5,
@@ -453,9 +440,7 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
                 size: 38,
               ),
             ),
-
             const SizedBox(height: 18),
-
             const Text(
               'No Past Papers Available',
               textAlign: TextAlign.center,
@@ -465,9 +450,7 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
                 color: Color(0xFF181B34),
               ),
             ),
-
             const SizedBox(height: 7),
-
             Text(
               'There are no $_mediumName past papers '
               'available for ${widget.subjectName} yet.',
@@ -496,9 +479,7 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
               color: Color(0xFFEF4444),
               size: 48,
             ),
-
             const SizedBox(height: 14),
-
             const Text(
               'Unable to load past papers',
               textAlign: TextAlign.center,
@@ -508,17 +489,13 @@ class _PastPaperListScreenState extends State<PastPaperListScreen> {
                 color: Color(0xFF181B34),
               ),
             ),
-
             const SizedBox(height: 8),
-
             Text(
               error.replaceFirst('Exception: ', ''),
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 12, color: Color(0xFF6B7086)),
             ),
-
             const SizedBox(height: 20),
-
             GestureDetector(
               onTap: _retry,
               child: Container(
@@ -565,6 +542,19 @@ class _PastPaperCard extends StatelessWidget {
 
   const _PastPaperCard({required this.paper, required this.onTap});
 
+  String get _mediumLabel {
+    switch (paper.medium) {
+      case 'si':
+        return 'Sinhala';
+      case 'en':
+        return 'English';
+      case 'ta':
+        return 'Tamil';
+      default:
+        return paper.medium.toUpperCase();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -602,9 +592,7 @@ class _PastPaperCard extends StatelessWidget {
                 size: 27,
               ),
             ),
-
             const SizedBox(width: 14),
-
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -619,20 +607,16 @@ class _PastPaperCard extends StatelessWidget {
                       color: Color(0xFF181B34),
                     ),
                   ),
-
                   const SizedBox(height: 5),
-
                   Text(
-                    'Paper ${paper.paperNumber}',
+                    'Paper ${paper.paperNumber} • $_mediumLabel',
                     style: const TextStyle(
                       fontSize: 11.5,
                       color: Color(0xFF6B7086),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-
                   const SizedBox(height: 7),
-
                   Row(
                     children: [
                       const Icon(
@@ -653,9 +637,7 @@ class _PastPaperCard extends StatelessWidget {
                 ],
               ),
             ),
-
             const SizedBox(width: 8),
-
             Container(
               width: 36,
               height: 36,

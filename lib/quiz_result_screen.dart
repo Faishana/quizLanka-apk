@@ -1,21 +1,17 @@
 // lib/quiz_result_screen.dart
 // QuizLanka AI — Quiz Result Screen (Light Theme)
-// Same data logic, animations, and API as before.
-// Presentation-only changes: dark → light surfaces, colors adjusted
-// for WCAG AA contrast on white, hero card kept as colored anchor.
+// + Time Taken now comes from Laravel's `duration_seconds`.
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:quiz_lanka/config/appTheam.dart';
 import 'package:quiz_lanka/quiz_review_screen.dart';
 
 // ─────────────────────────────────────────────
-// LIGHT THEME TOKENS (mirrors quiz_screen.dart)
+// LIGHT THEME TOKENS
 // ─────────────────────────────────────────────
 class _ResultTheme {
   static const Color background = Color(0xFFF7F8FC);
   static const Color surface = Colors.white;
-  static const Color surfaceMuted = Color(0xFFF1F3F9);
   static const Color border = Color(0xFFE4E7F0);
   static const Color borderStrong = Color(0xFFCBD1E0);
 
@@ -40,12 +36,17 @@ class QuizResultScreen extends StatefulWidget {
   final String subjectName;
   final Color subjectColor;
 
+  /// Live duration from backend (`duration_seconds`).
+  /// Falls back to whatever the payload contains if not provided.
+  final int durationSeconds;
+
   const QuizResultScreen({
     super.key,
     required this.quizId,
     required this.resultData,
     required this.subjectName,
     required this.subjectColor,
+    this.durationSeconds = 0,
   });
 
   @override
@@ -62,7 +63,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
   late final Animation<double> _actionsAnim;
   late final Animation<double> _ringAnim;
 
-  // ── Safely extract fields from different possible response shapes ──
+  // ── Field extractors ──────────────────────────────────────
   double get _percentage {
     final v =
         widget.resultData['percentage'] ??
@@ -95,13 +96,39 @@ class _QuizResultScreenState extends State<QuizResultScreen>
     return (v as num?)?.toInt() ?? (_correct + _wrong);
   }
 
+  /// Prefer the explicit `durationSeconds` passed from the quiz screen
+  /// (which comes from the Laravel `duration_seconds` response field).
+  /// Fall back to any legacy string/number fields in `resultData`.
   String get _duration {
-    final v =
+    if (widget.durationSeconds > 0) {
+      return _formatDuration(widget.durationSeconds);
+    }
+
+    final raw =
+        widget.resultData['duration_seconds'] ??
         widget.resultData['duration'] ??
         widget.resultData['time_taken'] ??
-        widget.resultData['result']?['duration'];
-    if (v == null) return '—';
-    return v.toString();
+        widget.resultData['result']?['duration_seconds'];
+
+    if (raw is num) {
+      return _formatDuration(raw.toInt());
+    }
+    if (raw is String && raw.isNotEmpty) return raw;
+    return '—';
+  }
+
+  String _formatDuration(int seconds) {
+    if (seconds <= 0) return '00:00';
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    if (h > 0) {
+      return '${h.toString().padLeft(2, '0')}:'
+          '${m.toString().padLeft(2, '0')}:'
+          '${s.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:'
+        '${s.toString().padLeft(2, '0')}';
   }
 
   String get _grade {
@@ -175,7 +202,6 @@ class _QuizResultScreenState extends State<QuizResultScreen>
       backgroundColor: _ResultTheme.background,
       body: Stack(
         children: [
-          // Soft pastel orbs for depth — much lighter than dark-theme version
           Positioned(
             top: -80,
             right: -60,
@@ -232,7 +258,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
   }
 
   // ─────────────────────────────────────────────
-  // HERO CARD — keeps colored gradient as the "score card"
+  // HERO CARD
   // ─────────────────────────────────────────────
   Widget _buildHeroCard() {
     return ClipRRect(
@@ -265,7 +291,6 @@ class _QuizResultScreenState extends State<QuizResultScreen>
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // Decorative oversized watermark icon
             Positioned(
               right: -22,
               top: -18,
@@ -359,7 +384,9 @@ class _QuizResultScreenState extends State<QuizResultScreen>
                                     color: Colors.white.withValues(alpha: 0.22),
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
-                                      color: Colors.white.withValues(alpha: 0.3),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.3,
+                                      ),
                                       width: 1,
                                     ),
                                   ),
@@ -522,7 +549,6 @@ class _QuizResultScreenState extends State<QuizResultScreen>
   Widget _buildActions(BuildContext context) {
     return Column(
       children: [
-        // Review Answers — gradient glow CTA (kept, looks great on light)
         SizedBox(
           width: double.infinity,
           height: 54,
@@ -581,7 +607,6 @@ class _QuizResultScreenState extends State<QuizResultScreen>
           ),
         ),
         const SizedBox(height: 12),
-        // Back to Dashboard
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
@@ -614,7 +639,7 @@ class _QuizResultScreenState extends State<QuizResultScreen>
 }
 
 // ─────────────────────────────────────────────
-// ANIMATION HELPERS (unchanged)
+// ANIMATION HELPERS
 // ─────────────────────────────────────────────
 
 class _FadeSlideIn extends StatelessWidget {
@@ -647,10 +672,8 @@ class _FadeSlideIn extends StatelessWidget {
   }
 }
 
-/// Gradient progress ring with soft outer glow + bright handle dot.
-/// (Kept identical — it renders on the colored hero card.)
 class _GlowRingPainter extends CustomPainter {
-  final double progress; // 0..1
+  final double progress;
   final double strokeWidth;
 
   _GlowRingPainter({required this.progress, required this.strokeWidth});
@@ -664,7 +687,6 @@ class _GlowRingPainter extends CustomPainter {
     final rect = Rect.fromCircle(center: center, radius: radius);
     const sweepFull = 2 * math.pi;
 
-    // Track
     final trackPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.22)
       ..style = PaintingStyle.stroke
@@ -675,7 +697,6 @@ class _GlowRingPainter extends CustomPainter {
     if (progress <= 0) return;
     final sweep = sweepFull * progress;
 
-    // Soft blurred glow behind progress arc
     final glowPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.55)
       ..style = PaintingStyle.stroke
@@ -684,7 +705,6 @@ class _GlowRingPainter extends CustomPainter {
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
     canvas.drawArc(rect, _start, sweep, false, glowPaint);
 
-    // Crisp progress arc
     final progressPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
@@ -692,7 +712,6 @@ class _GlowRingPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     canvas.drawArc(rect, _start, sweep, false, progressPaint);
 
-    // Handle dot at tip
     final angle = _start + sweep;
     final handleCenter = Offset(
       center.dx + radius * math.cos(angle),
@@ -746,7 +765,6 @@ class _StatCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Icon chip with soft color glow
           Container(
             width: 40,
             height: 40,
@@ -838,6 +856,7 @@ class _DetailRow extends StatelessWidget {
               color: valueColor ?? _ResultTheme.textPrimary,
               fontSize: 14,
               fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
         ),
@@ -858,7 +877,6 @@ class _RowDivider extends StatelessWidget {
   }
 }
 
-/// Soft blurred color orb used purely for background depth.
 class _GlowOrb extends StatelessWidget {
   final Color color;
   final double size;

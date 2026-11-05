@@ -496,51 +496,256 @@ class _DifficultyCard extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// "Starting quiz…" dialog — light card on translucent white
+// "Starting quiz…" dialog — polished, animated, glassy card
 // ------------------------------------------------------------
-class _StartingQuizDialog extends StatelessWidget {
+class _StartingQuizDialog extends StatefulWidget {
   const _StartingQuizDialog();
 
+  @override
+  State<_StartingQuizDialog> createState() => _StartingQuizDialogState();
+}
+
+class _StartingQuizDialogState extends State<_StartingQuizDialog>
+    with TickerProviderStateMixin {
+  // ← MULTIPLE tickers (pulse + spin)
   static const Color _accentBlue = Color(0xFF3B82F6);
+  static const Color _accentViolet = Color(0xFF7C3AED);
   static const Color _lightTextPrimary = Color(0xFF12213B);
+  static const Color _lightTextSecondary = Color(0xFF5A6B85);
+
+  late final AnimationController _pulseController;
+  late final AnimationController _spinController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+
+    _spinController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _spinController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.white.withValues(alpha: 0.35),
-      child: Center(
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 60),
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.92),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _accentBlue.withValues(alpha: 0.20)),
-            boxShadow: [
-              BoxShadow(
-                color: _accentBlue.withValues(alpha: 0.15),
-                blurRadius: 24,
-                offset: const Offset(0, 10),
+    return PopScope(
+      canPop: false,
+      child: Container(
+        color: const Color(0xFF12213B).withValues(alpha: 0.28),
+        child: Center(
+          child: ScaleTransition(
+            scale: CurvedAnimation(
+              parent: _spinController,
+              curve: const Interval(0.0, 0.15, curve: Curves.easeOutBack),
+            ),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 44),
+              padding: const EdgeInsets.fromLTRB(28, 32, 28, 26),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: _accentBlue.withValues(alpha: 0.10)),
+                boxShadow: [
+                  BoxShadow(
+                    color: _accentBlue.withValues(alpha: 0.20),
+                    blurRadius: 40,
+                    offset: const Offset(0, 20),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
-            ],
-          ),
-          child: const Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: _accentBlue, strokeWidth: 2.5),
-              SizedBox(height: 16),
-              Text(
-                'Starting quiz...',
-                style: TextStyle(
-                  color: _lightTextPrimary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ─── Animated loader ────────────────────────
+                  SizedBox(
+                    width: 88,
+                    height: 88,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Pulsing halo ring
+                        AnimatedBuilder(
+                          animation: _pulseController,
+                          builder: (context, child) {
+                            return Container(
+                              width: 60 + 28 * _pulseController.value,
+                              height: 60 + 28 * _pulseController.value,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: RadialGradient(
+                                  colors: [
+                                    _accentBlue.withValues(
+                                      alpha:
+                                          0.25 * (1 - _pulseController.value),
+                                    ),
+                                    _accentBlue.withValues(alpha: 0.0),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        // Outer gradient ring
+                        const SizedBox(
+                          width: 68,
+                          height: 68,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 3,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              _accentBlue,
+                            ),
+                            backgroundColor: Color(0xFFEAF3FF),
+                          ),
+                        ),
+                        // Rotating inner gradient icon
+                        RotationTransition(
+                          turns: _spinController,
+                          child: Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [_accentBlue, _accentViolet],
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: _accentBlue.withValues(alpha: 0.45),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.auto_awesome_rounded,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 22),
+
+                  // ─── Title ──────────────────────────────────
+                  const Text(
+                    'Preparing your quiz',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: _lightTextPrimary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // ─── Subtitle ───────────────────────────────
+                  const Text(
+                    'Fetching questions and setting things up…',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: _lightTextSecondary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // ─── Animated loading dots ──────────────────
+                  const _LoadingDots(color: _accentBlue),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
+    );
+  }
+}
+
+// ------------------------------------------------------------
+// Three pulsing dots — subtle motion under the subtitle
+// ------------------------------------------------------------
+class _LoadingDots extends StatefulWidget {
+  const _LoadingDots({required this.color});
+  final Color color;
+
+  @override
+  State<_LoadingDots> createState() => _LoadingDotsState();
+}
+
+class _LoadingDotsState extends State<_LoadingDots>
+    with SingleTickerProviderStateMixin {
+  // ← only ONE ticker here — OK
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (i) {
+            final offset = i * 0.2;
+            final t = ((_controller.value + offset) % 1.0);
+            final scale = 0.6 + (t < 0.5 ? t * 2 : (1 - t) * 2) * 0.4;
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: Transform.scale(
+                scale: scale,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: widget.color.withValues(alpha: 0.4 + scale * 0.5),
+                  ),
+                ),
+              ),
+            );
+          }),
+        );
+      },
     );
   }
 }

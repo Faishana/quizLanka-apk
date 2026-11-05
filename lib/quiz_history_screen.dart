@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:quiz_lanka/Login.dart';
 import 'package:quiz_lanka/config/api_config.dart';
-import 'package:quiz_lanka/config/appTheam.dart';
 import 'package:quiz_lanka/quiz_result_screen.dart';
 
 // ─────────────────────────────────────────────
@@ -38,7 +37,6 @@ class _LightTheme {
   static const Color textSecondary = Color(0xFF6B7A99);
 
   static const Color surface = Colors.white;
-  static const Color surfaceMuted = Color(0xFFF3F6FF);
   static const Color border = Color(0xFFDCE4FF);
 
   static List<BoxShadow> blueShadow({
