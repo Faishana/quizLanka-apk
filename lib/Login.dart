@@ -1,5 +1,6 @@
 // ignore_for_file: file_names
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 
@@ -81,6 +82,7 @@ class TokenStorage {
 
   static const String _tokenKey = 'auth_token';
   static const String _userKey = 'auth_user';
+  static const String _rememberedEmailKey = 'remembered_email';
 
   static Future<void> saveToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
@@ -92,7 +94,6 @@ class TokenStorage {
     return prefs.getString(_tokenKey);
   }
 
-  // CHECK TOKEN
   static Future<bool> hasToken() async {
     final token = await getToken();
     return token != null && token.isNotEmpty;
@@ -116,6 +117,22 @@ class TokenStorage {
     }
   }
 
+  // ── Remember me (stores email only, never the password) ─────
+  static Future<void> saveRememberedEmail(String email) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_rememberedEmailKey, email);
+  }
+
+  static Future<String?> getRememberedEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_rememberedEmailKey);
+  }
+
+  static Future<void> clearRememberedEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_rememberedEmailKey);
+  }
+
   static Future<void> clearAll() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
@@ -132,6 +149,40 @@ class AuthService {
   factory AuthService() => _instance;
 
   final http.Client _client = http.Client();
+  static const Duration _timeout = Duration(seconds: 30);
+
+  // ── helpers ─────────────────────────────────────────────────
+  Map<String, dynamic> _decode(String body) {
+    try {
+      final d = jsonDecode(body);
+      if (d is Map<String, dynamic>) return d;
+      if (d is Map) return Map<String, dynamic>.from(d);
+    } catch (_) {}
+    return <String, dynamic>{};
+  }
+
+  /// Returns the first validation error (422) or null.
+  String? _firstValidationError(Map<String, dynamic> data) {
+    final errors = data['errors'];
+    if (errors is Map && errors.isNotEmpty) {
+      final first = errors.values.first;
+      return first is List && first.isNotEmpty
+          ? first.first.toString()
+          : first.toString();
+    }
+    return null;
+  }
+
+  String _friendlyError(Object e) {
+    if (e is TimeoutException) {
+      return 'Request timed out. Please check your connection.';
+    }
+    final s = e.toString();
+    if (s.contains('SocketException') || s.contains('ClientException')) {
+      return 'Cannot reach the server. Please check your internet connection.';
+    }
+    return s;
+  }
 
   // ── REGISTER ────────────────────────────────────────────────
   Future<Map<String, dynamic>> register(
@@ -151,21 +202,22 @@ class AuthService {
       };
 
       debugPrint('REGISTER URL: $url');
-      debugPrint('REQUEST BODY: ${jsonEncode(requestBody)}');
 
-      final response = await _client.post(
-        Uri.parse(url),
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(requestBody),
-      );
+      final response = await _client
+          .post(
+            Uri.parse(url),
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(requestBody),
+          )
+          .timeout(_timeout);
 
-      debugPrint('STATUS CODE: ${response.statusCode}');
-      debugPrint('RESPONSE: ${response.body}');
+      debugPrint('REGISTER STATUS: ${response.statusCode}');
+      debugPrint('REGISTER RESPONSE: ${response.body}');
 
-      final data = jsonDecode(response.body);
+      final data = _decode(response.body);
 
       if ((response.statusCode == 200 || response.statusCode == 201) &&
           data['success'] == true) {
@@ -181,14 +233,8 @@ class AuthService {
       }
 
       if (response.statusCode == 422) {
-        final errors = data['errors'];
-        if (errors is Map && errors.isNotEmpty) {
-          final firstError = errors.values.first;
-          final message = firstError is List && firstError.isNotEmpty
-              ? firstError.first.toString()
-              : firstError.toString();
-          return {'success': false, 'message': message};
-        }
+        final msg = _firstValidationError(data);
+        if (msg != null) return {'success': false, 'message': msg};
       }
 
       return {
@@ -198,7 +244,7 @@ class AuthService {
     } catch (e, s) {
       debugPrint('REGISTER ERROR: $e');
       debugPrint(s.toString());
-      return {'success': false, 'message': e.toString()};
+      return {'success': false, 'message': _friendlyError(e)};
     }
   }
 
@@ -207,19 +253,21 @@ class AuthService {
     try {
       final url = '${ApiConfig.baseUrl}${ApiConfig.login}';
 
-      final response = await _client.post(
-        Uri.parse(url),
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'email': email, 'password': password}),
-      );
+      final response = await _client
+          .post(
+            Uri.parse(url),
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'email': email, 'password': password}),
+          )
+          .timeout(_timeout);
 
       debugPrint('LOGIN STATUS: ${response.statusCode}');
       debugPrint('LOGIN RESPONSE: ${response.body}');
 
-      final data = jsonDecode(response.body);
+      final data = _decode(response.body);
 
       if (response.statusCode == 200 && data['success'] == true) {
         await TokenStorage.saveToken(data['token']);
@@ -237,20 +285,14 @@ class AuthService {
       }
 
       if (response.statusCode == 422) {
-        final errors = data['errors'];
-        if (errors is Map && errors.isNotEmpty) {
-          final firstError = errors.values.first;
-          final message = firstError is List && firstError.isNotEmpty
-              ? firstError.first.toString()
-              : firstError.toString();
-          return {'success': false, 'message': message};
-        }
+        final msg = _firstValidationError(data);
+        if (msg != null) return {'success': false, 'message': msg};
       }
 
       return {'success': false, 'message': data['message'] ?? 'Login failed'};
     } catch (e) {
       debugPrint('LOGIN ERROR: $e');
-      return {'success': false, 'message': e.toString()};
+      return {'success': false, 'message': _friendlyError(e)};
     }
   }
 
@@ -285,20 +327,22 @@ class AuthService {
       debugPrint('ONBOARDING URL: $url');
       debugPrint('ONBOARDING BODY: ${jsonEncode(requestBody)}');
 
-      final response = await _client.post(
-        Uri.parse(url),
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(requestBody),
-      );
+      final response = await _client
+          .post(
+            Uri.parse(url),
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(requestBody),
+          )
+          .timeout(_timeout);
 
       debugPrint('ONBOARDING STATUS: ${response.statusCode}');
       debugPrint('ONBOARDING RESPONSE: ${response.body}');
 
-      final data = jsonDecode(response.body);
+      final data = _decode(response.body);
 
       if (response.statusCode == 200 && data['success'] == true) {
         if (data['user'] is Map) {
@@ -312,14 +356,8 @@ class AuthService {
       }
 
       if (response.statusCode == 422) {
-        final errors = data['errors'];
-        if (errors is Map && errors.isNotEmpty) {
-          final firstError = errors.values.first;
-          final message = firstError is List && firstError.isNotEmpty
-              ? firstError.first.toString()
-              : firstError.toString();
-          return {'success': false, 'message': message};
-        }
+        final msg = _firstValidationError(data);
+        if (msg != null) return {'success': false, 'message': msg};
       }
 
       return {
@@ -328,7 +366,7 @@ class AuthService {
       };
     } catch (e) {
       debugPrint('ONBOARDING ERROR: $e');
-      return {'success': false, 'message': 'Network error: $e'};
+      return {'success': false, 'message': _friendlyError(e)};
     }
   }
 
@@ -337,13 +375,15 @@ class AuthService {
     try {
       final token = await TokenStorage.getToken();
       if (token != null && token.isNotEmpty) {
-        await _client.post(
-          Uri.parse('${ApiConfig.baseUrl}${ApiConfig.logout}'),
-          headers: {
-            'Accept': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-        );
+        await _client
+            .post(
+              Uri.parse('${ApiConfig.baseUrl}${ApiConfig.logout}'),
+              headers: {
+                'Accept': 'application/json',
+                'Authorization': 'Bearer $token',
+              },
+            )
+            .timeout(_timeout);
       }
     } catch (e) {
       debugPrint('LOGOUT ERROR: $e');
@@ -358,16 +398,18 @@ class AuthService {
       final token = await TokenStorage.getToken();
       if (token == null || token.isEmpty) return null;
 
-      final response = await _client.get(
-        Uri.parse('${ApiConfig.baseUrl}${ApiConfig.me}'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final response = await _client
+          .get(
+            Uri.parse('${ApiConfig.baseUrl}${ApiConfig.me}'),
+            headers: {
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(_timeout);
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        final data = _decode(response.body);
         if (data['user'] is Map) {
           final user = User.fromJson(Map<String, dynamic>.from(data['user']));
           await TokenStorage.saveUser(user.toJson());
@@ -440,16 +482,13 @@ class AuthProvider extends ChangeNotifier {
 
       if (result['success'] == true) {
         _user = result['user'] as User?;
-        notifyListeners();
         return true;
       } else {
         _error = result['message'];
-        notifyListeners();
         return false;
       }
     } catch (e) {
       _error = e.toString();
-      notifyListeners();
       return false;
     } finally {
       _isLoading = false;
@@ -468,16 +507,13 @@ class AuthProvider extends ChangeNotifier {
 
       if (result['success'] == true) {
         _user = result['user'] as User?;
-        notifyListeners();
         return true;
       } else {
         _error = result['message'];
-        notifyListeners();
         return false;
       }
     } catch (e) {
       _error = e.toString();
-      notifyListeners();
       return false;
     } finally {
       _isLoading = false;
@@ -511,13 +547,11 @@ class AuthProvider extends ChangeNotifier {
         if (userData is Map) {
           _user = User.fromJson(Map<String, dynamic>.from(userData));
         } else {
-          // Fallback: reload from storage in case response lacks user
           final stored = await TokenStorage.getUser();
           if (stored != null) {
             _user = User.fromJson(stored);
           }
         }
-        notifyListeners();
         return true;
       }
 
@@ -565,6 +599,7 @@ class _LoginTokens {
 
   static const double fieldRadius = 16;
   static const double cardRadius = 28;
+  static const double maxCardWidth = 440; // keeps card nice on tablets
 }
 
 // ============================================================
@@ -587,9 +622,9 @@ class _LoginScreenState extends State<LoginScreen>
   bool _isLoading = false;
   bool _rememberMe = false;
 
-  late AnimationController _animController;
-  late Animation<double> _cardSlide;
-  late Animation<double> _cardFade;
+  late final AnimationController _animController;
+  late final Animation<double> _cardSlide;
+  late final Animation<double> _cardFade;
 
   @override
   void initState() {
@@ -603,6 +638,18 @@ class _LoginScreenState extends State<LoginScreen>
     );
     _cardFade = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
+    _loadRememberedEmail();
+  }
+
+  Future<void> _loadRememberedEmail() async {
+    final saved = await TokenStorage.getRememberedEmail();
+    if (!mounted) return;
+    if (saved != null && saved.isNotEmpty) {
+      setState(() {
+        _emailController.text = saved;
+        _rememberMe = true;
+      });
+    }
   }
 
   @override
@@ -611,6 +658,19 @@ class _LoginScreenState extends State<LoginScreen>
     _passwordController.dispose();
     _animController.dispose();
     super.dispose();
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
   }
 
   // ── HANDLE LOGIN ────────────────────────────────────────────
@@ -623,61 +683,65 @@ class _LoginScreenState extends State<LoginScreen>
 
     try {
       final auth = context.read<AuthProvider>();
+      final email = _emailController.text.trim();
 
-      final success = await auth.login(
-        _emailController.text.trim(),
-        _passwordController.text.trim(),
-      );
+      // NOTE: password is NOT trimmed – spaces can be part of a password.
+      final success = await auth.login(email, _passwordController.text);
 
+      if (!mounted) return;
       setState(() => _isLoading = false);
 
-      if (success && mounted) {
+      if (success) {
+        if (_rememberMe) {
+          await TokenStorage.saveRememberedEmail(email);
+        } else {
+          await TokenStorage.clearRememberedEmail();
+        }
+        if (!mounted) return;
         _goToNextScreen();
-      } else if (mounted) {
-        final err = context.read<AuthProvider>().error;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(err ?? 'Login failed. Please try again.'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
-          ),
-        );
+      } else {
+        _showError(auth.error ?? 'Login failed. Please try again.');
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
+      _showError('Error: $e');
     }
   }
 
   void _goToNextScreen() {
     final auth = context.read<AuthProvider>();
 
-    if (auth.user?.needsOnboarding == true) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const UserOnboardingScreen()),
-      );
-    } else {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const MainNavigation()),
-      );
-    }
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => auth.user?.needsOnboarding == true
+            ? const UserOnboardingScreen()
+            : const MainNavigation(),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
     return Scaffold(
-      resizeToAvoidBottomInset: true,
+      // Background must NOT resize with the keyboard; we pad the scroll view
+      // ourselves instead.
+      resizeToAvoidBottomInset: false,
       backgroundColor: _LoginTokens.backgroundGradient.first,
       body: Stack(
+        // ✅ FIX: makes the Stack fill the whole screen, so the background
+        // covers everything instead of shrinking to the card's height.
+        fit: StackFit.expand,
         children: [
+          // Background image
           Positioned.fill(
             child: Image.asset(
               'assets/login_bg.png',
               fit: BoxFit.cover,
+              alignment: Alignment.topCenter,
               errorBuilder: (_, error, stackTrace) => Container(
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
@@ -689,6 +753,8 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
           ),
+
+          // Dark overlay for readability
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -705,29 +771,50 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
           ),
+
+          // Content – centered vertically, scrolls when keyboard is open
           SafeArea(
-            child: SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: AnimatedBuilder(
-                animation: _animController,
-                builder: (_, child) => Opacity(
-                  opacity: _cardFade.value,
-                  child: Transform.translate(
-                    offset: Offset(0, _cardSlide.value),
-                    child: child,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding: EdgeInsets.fromLTRB(24, 0, 24, bottomInset),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight,
+                    ),
+                    child: Center(
+                      child: AnimatedBuilder(
+                        animation: _animController,
+                        builder: (_, child) => Opacity(
+                          opacity: _cardFade.value,
+                          child: Transform.translate(
+                            offset: Offset(0, _cardSlide.value),
+                            child: child,
+                          ),
+                        ),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            maxWidth: _LoginTokens.maxCardWidth,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(height: 24),
+                              const _BrandMark(),
+                              const SizedBox(height: 32),
+                              _buildFormCard(),
+                              const SizedBox(height: 24),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-                child: Column(
-                  children: [
-                    const SizedBox(height: 24),
-                    const _BrandMark(),
-                    const SizedBox(height: 32),
-                    _buildFormCard(),
-                    const SizedBox(height: 24),
-                  ],
-                ),
-              ),
+                );
+              },
             ),
           ),
         ],
@@ -758,6 +845,7 @@ class _LoginScreenState extends State<LoginScreen>
           child: Form(
             key: _formKey,
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
@@ -786,9 +874,16 @@ class _LoginScreenState extends State<LoginScreen>
                   hint: 'Email Address',
                   icon: Icons.mail_outline_rounded,
                   keyboardType: TextInputType.emailAddress,
+                  textInputAction: TextInputAction.next,
+                  autofillHints: const [AutofillHints.email],
                   validator: (v) {
-                    if (v == null || v.isEmpty) return 'Enter your email';
-                    if (!v.contains('@')) return 'Enter a valid email';
+                    final value = v?.trim() ?? '';
+                    if (value.isEmpty) return 'Enter your email';
+                    if (!RegExp(
+                      r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                    ).hasMatch(value)) {
+                      return 'Enter a valid email';
+                    }
                     return null;
                   },
                 ),
@@ -798,6 +893,9 @@ class _LoginScreenState extends State<LoginScreen>
                   hint: 'Password',
                   icon: Icons.lock_outline_rounded,
                   obscure: _obscurePassword,
+                  textInputAction: TextInputAction.done,
+                  autofillHints: const [AutofillHints.password],
+                  onSubmitted: (_) => _handleLogin(),
                   suffix: IconButton(
                     icon: Icon(
                       _obscurePassword
@@ -810,10 +908,7 @@ class _LoginScreenState extends State<LoginScreen>
                         setState(() => _obscurePassword = !_obscurePassword),
                   ),
                   validator: (v) {
-                    if (v == null || v.isEmpty) {
-                      return 'Enter your password';
-                    }
-                    if (v.length < 8) return 'Minimum 8 characters';
+                    if (v == null || v.isEmpty) return 'Enter your password';
                     return null;
                   },
                 ),
@@ -865,6 +960,7 @@ class _LoginScreenState extends State<LoginScreen>
     return Row(
       children: [
         GestureDetector(
+          behavior: HitTestBehavior.opaque,
           onTap: () => setState(() => _rememberMe = !_rememberMe),
           child: Row(
             children: [
@@ -899,7 +995,17 @@ class _LoginScreenState extends State<LoginScreen>
         ),
         const Spacer(),
         GestureDetector(
-          onTap: () {},
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(
+                const SnackBar(
+                  content: Text('Password reset is coming soon.'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+          },
           child: const Text(
             'Forgot Password?',
             style: TextStyle(
@@ -984,6 +1090,9 @@ class _GlassTextField extends StatelessWidget {
     required this.hint,
     required this.icon,
     this.keyboardType = TextInputType.text,
+    this.textInputAction,
+    this.autofillHints,
+    this.onSubmitted,
     this.obscure = false,
     this.suffix,
     this.validator,
@@ -993,6 +1102,9 @@ class _GlassTextField extends StatelessWidget {
   final String hint;
   final IconData icon;
   final TextInputType keyboardType;
+  final TextInputAction? textInputAction;
+  final Iterable<String>? autofillHints;
+  final ValueChanged<String>? onSubmitted;
   final bool obscure;
   final Widget? suffix;
   final String? Function(String?)? validator;
@@ -1002,6 +1114,9 @@ class _GlassTextField extends StatelessWidget {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
+      textInputAction: textInputAction,
+      autofillHints: autofillHints,
+      onFieldSubmitted: onSubmitted,
       obscureText: obscure,
       style: const TextStyle(
         fontSize: 15,

@@ -152,7 +152,7 @@ class _ForgotPasswordService {
 // SCREEN
 // ─────────────────────────────────────────────
 class ForgotPasswordScreen extends StatefulWidget {
-  const ForgotPasswordScreen({super.key});
+  const ForgotPasswordScreen({super.key, String? initialEmail});
 
   @override
   State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
