@@ -7,8 +7,7 @@ class ApiConfig {
   // Physical Device  : http://192.168.x.x:8000/api
 
   //static const String baseUrl = 'http://127.0.0.1:8000/api';
-  static const String baseUrl = 'https://quizlanka.lk/api';
-
+  static const String baseUrl ='https://api.quizlanka.lk/api';
   // ============================
   // Authentication
   // ============================
@@ -101,11 +100,12 @@ class ApiConfig {
   // ============================
   // Past Papers
   // ============================
-
-  static const String pastPaperSubjects ='/past-papers/subjects';
-  static const String pastPaperList = '/past-papers/list';
-  static String pastPaperDetails(int paperId) => '/past-papers/$paperId';
-  static String pastPaperSubmit(int paperId) => '/past-papers/$paperId/submit';
-
   
+
+  static const String pastPaperSubjects = '/past-papers/subjects';
+  static const String pastPaperList = '/past-papers';
+  static String pastPaperDetails(int paperId) => '/past-papers/$paperId';
+  static String pastPaperStart(int paperId) => '/past-papers/$paperId/start';
+  static String pastPaperSubmit(int paperId) => '/past-papers/$paperId/submit';
+  static String pastPaperSaveAnswer(int quizId) => '/past-paper-attempts/$quizId/answers';
 }

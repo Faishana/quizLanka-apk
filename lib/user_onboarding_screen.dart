@@ -1,12 +1,18 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:quiz_lanka/Login.dart';
+import 'package:quiz_lanka/QL.dart';
+import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/main_navigation.dart';
 
-import '../../config/api_config.dart';
+// These two values are sent to the backend exactly as written.
+const String _kStudent = 'Student';
+const String _kGovCandidate = 'Government Exam Candidate';
 
 class UserOnboardingScreen extends StatefulWidget {
   const UserOnboardingScreen({super.key});
@@ -22,16 +28,16 @@ class _UserOnboardingScreenState extends State<UserOnboardingScreen> {
   String? _userCategory;
   String? _district;
   String? _alStream;
-
   int? _gradeId;
 
   List<Map<String, dynamic>> _grades = [];
 
   bool _loadingGrades = true;
+  bool _gradesFailed = false;
   bool _submitting = false;
   String? _errorMessage;
 
-  final List<String> _districts = [
+  static const List<String> _districts = [
     'Ampara',
     'Anuradhapura',
     'Badulla',
@@ -59,7 +65,7 @@ class _UserOnboardingScreenState extends State<UserOnboardingScreen> {
     'Vavuniya',
   ];
 
-  final List<Map<String, String>> _alStreams = [
+  static const List<Map<String, String>> _alStreams = [
     {'value': 'maths', 'label': 'Physical Science'},
     {'value': 'bio', 'label': 'Biological Science'},
     {'value': 'commerce', 'label': 'Commerce'},
@@ -82,48 +88,64 @@ class _UserOnboardingScreenState extends State<UserOnboardingScreen> {
   // ==============================
   // FETCH GRADES
   // ==============================
-
   Future<void> _fetchGrades() async {
+    setState(() {
+      _loadingGrades = true;
+      _gradesFailed = false;
+    });
+
     try {
-      final response = await http.get(
-        ApiConfig.uri(ApiConfig.grades),
-        headers: ApiConfig.getHeaders(null),
-      );
+      final response = await http
+          .get(
+            ApiConfig.uri(ApiConfig.grades),
+            headers: ApiConfig.getHeaders(null),
+          )
+          .timeout(const Duration(seconds: 15));
 
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-
-        List<dynamic> gradeList = [];
-
-        if (decoded is List) {
-          gradeList = decoded;
-        } else if (decoded is Map) {
-          if (decoded['data'] is List) {
-            gradeList = decoded['data'];
-          } else if (decoded['grades'] is List) {
-            gradeList = decoded['grades'];
-          }
-        }
-
-        if (!mounted) return;
-
-        setState(() {
-          _grades = gradeList
-              .whereType<Map>()
-              .map((item) => Map<String, dynamic>.from(item))
-              .toList();
-
-          _loadingGrades = false;
-        });
-      } else {
+      if (response.statusCode != 200) {
         throw Exception('Unable to load grades');
       }
-    } catch (e) {
+
+      final decoded = jsonDecode(response.body);
+      List<dynamic> gradeList = [];
+
+      if (decoded is List) {
+        gradeList = decoded;
+      } else if (decoded is Map) {
+        if (decoded['data'] is List) {
+          gradeList = decoded['data'];
+        } else if (decoded['grades'] is List) {
+          gradeList = decoded['grades'];
+        }
+      }
+
       if (!mounted) return;
 
       setState(() {
+        _grades =
+            gradeList
+                .whereType<Map>()
+                .map((item) => Map<String, dynamic>.from(item))
+                .where(
+                  (grade) =>
+                      grade['is_active'] == 1 ||
+                      grade['is_active'] == true ||
+                      grade['is_active'] == '1',
+                )
+                .toList()
+              ..sort((a, b) {
+                final aOrder = int.tryParse('${a['sort_order']}') ?? 0;
+                final bOrder = int.tryParse('${b['sort_order']}') ?? 0;
+                return aOrder.compareTo(bOrder);
+              });
         _loadingGrades = false;
-        _errorMessage = 'Unable to load grades. Please try again.';
+        _gradesFailed = _grades.isEmpty;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingGrades = false;
+        _gradesFailed = true;
       });
     }
   }
@@ -131,569 +153,450 @@ class _UserOnboardingScreenState extends State<UserOnboardingScreen> {
   // ==============================
   // CHECK A/L GRADE
   // ==============================
+  String _gradeName(Map<String, dynamic> g) =>
+      (g['name'] ?? g['grade_name'] ?? 'Grade').toString();
 
   bool get _isALGrade {
-    final selectedGrade = _grades.firstWhere(
-      (grade) => grade['id'] == _gradeId,
-      orElse: () => {},
+    if (_gradeId == null) return false;
+
+    final selected = _grades.firstWhere(
+      (g) => int.tryParse('${g['id']}') == _gradeId,
+      orElse: () => <String, dynamic>{},
     );
 
-    final gradeName =
-        (selectedGrade['name'] ?? selectedGrade['grade_name'] ?? '')
-            .toString()
-            .toLowerCase();
-
-    return gradeName.contains('12') ||
-        gradeName.contains('13') ||
-        gradeName.contains('a/l') ||
-        gradeName.contains('advanced level');
+    return selected['category']?.toString().toLowerCase() == 'al';
   }
 
   // ==============================
-  // SUBMIT ONBOARDING
+  // SUBMIT
   // ==============================
-
   Future<void> _completeOnboarding() async {
-    if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _errorMessage = null);
 
     if (_userCategory == null) {
-      _showMessage('Please select your category.');
+      setState(() => _errorMessage = 'Please select your category.');
       return;
     }
 
-    if (_district == null) {
-      _showMessage('Please select your district.');
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
 
-    if (_userCategory == 'Student' && _gradeId == null) {
-      _showMessage('Please select your grade.');
-      return;
-    }
+    final isStudent = _userCategory == _kStudent;
 
-    if (_userCategory == 'Student' && _isALGrade && _alStream == null) {
-      _showMessage('Please select your A/L stream.');
-      return;
-    }
+    setState(() => _submitting = true);
 
-    setState(() {
-      _submitting = true;
-    });
+    final auth = context.read<AuthProvider>();
 
-    try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final success = await auth.completeOnboarding(
+      userCategory: _userCategory!,
+      gradeId: isStudent ? _gradeId : null,
+      school: isStudent ? _schoolController.text.trim() : null,
+      district: _district!,
+      alStream: isStudent && _isALGrade ? _alStream : null,
+    );
 
-      final success = await authProvider.completeOnboarding(
-        userCategory: _userCategory!,
-        gradeId: _userCategory == 'Student' ? _gradeId : null,
-        school: _userCategory == 'Student'
-            ? _schoolController.text.trim()
-            : null,
-        district: _district!,
-        alStream: _userCategory == 'Student' && _isALGrade ? _alStream : null,
+    if (!mounted) return;
+
+    if (success) {
+      HapticFeedback.lightImpact();
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MainNavigation()),
+        (route) => false,
       );
-
-      if (!mounted) return;
-
-      if (success) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => const MainNavigation()),
-          (route) => false,
-        );
-      } else {
-        _showMessage('Unable to complete your profile. Please try again.');
-      }
-    } catch (e) {
-      if (!mounted) return;
-      _showMessage('Something went wrong. Please try again.');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _submitting = false;
-        });
-      }
+    } else {
+      HapticFeedback.mediumImpact();
+      setState(() {
+        _submitting = false;
+        _errorMessage =
+            auth.error ?? 'Unable to complete your profile. Please try again.';
+      });
     }
   }
 
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+  Future<void> _logout() async {
+    final auth = context.read<AuthProvider>();
+    final nav = Navigator.of(context);
+    await auth.logout();
+    nav.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
     );
+  }
+
+  void _selectCategory(String category) {
+    setState(() {
+      _userCategory = category;
+      _gradeId = null;
+      _alStream = null;
+      _errorMessage = null;
+    });
   }
 
   // ==============================
   // UI
   // ==============================
-
   @override
   Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF5B4BDB);
+    final isStudent = _userCategory == _kStudent;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F7FC),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 20),
+    return QLAuthLayout(
+      header: _buildHeader(),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_errorMessage != null) ...[
+              QLErrorBanner(message: _errorMessage!),
+              const SizedBox(height: 16),
+            ],
 
-                    // LOGO
-                    Center(
-                      child: Container(
-                        width: 68,
-                        height: 68,
-                        decoration: BoxDecoration(
-                          color: primaryColor.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Icon(
-                          Icons.school_rounded,
-                          color: primaryColor,
-                          size: 36,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 28),
-
-                    const Center(
-                      child: Text(
-                        'Let’s Set Up Your Profile',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 25,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF20213A),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 10),
-
-                    const Center(
-                      child: Text(
-                        'Tell us a little about yourself to personalize '
-                        'your QuizLanka AI experience.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 14,
-                          height: 1.6,
-                          color: Colors.black54,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 35),
-
-                    _sectionTitle('I am a'),
-
-                    const SizedBox(height: 12),
-
-                    _categoryCard(
-                      title: 'Student',
-                      subtitle: 'I am currently studying at school.',
-                      icon: Icons.school_outlined,
-                      selected: _userCategory == 'Student',
-                      onTap: () {
-                        setState(() {
-                          _userCategory = 'Student';
-                          _gradeId = null;
-                          _alStream = null;
-                          _errorMessage = null;
-                        });
-                      },
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _categoryCard(
-                      title: 'Government Exam Candidate',
-                      subtitle: 'I am preparing for government exams.',
-                      icon: Icons.assignment_outlined,
-                      selected: _userCategory == 'Government Exam Candidate',
-                      onTap: () {
-                        setState(() {
-                          _userCategory = 'Government Exam Candidate';
-                          _gradeId = null;
-                          _alStream = null;
-                          _errorMessage = null;
-                        });
-                      },
-                    ),
-
-                    // STUDENT FIELDS
-                    if (_userCategory == 'Student') ...[
-                      const SizedBox(height: 28),
-
-                      _sectionTitle('Your Education'),
-
-                      const SizedBox(height: 12),
-
-                      _fieldLabel('Select Your Grade'),
-
-                      const SizedBox(height: 8),
-
-                      if (_loadingGrades)
-                        const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(20),
-                            child: CircularProgressIndicator(
-                              color: primaryColor,
-                            ),
-                          ),
-                        )
-                      else if (_grades.isEmpty)
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Grades could not be loaded.',
-                              style: TextStyle(color: Colors.red),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                setState(() {
-                                  _loadingGrades = true;
-                                  _errorMessage = null;
-                                });
-                                _fetchGrades();
-                              },
-                              child: const Text('Retry'),
-                            ),
-                          ],
-                        )
-                      else
-                        DropdownButtonFormField<int>(
-                          value: _gradeId,
-                          isExpanded: true,
-                          decoration: _inputDecoration(
-                            hint: 'Choose your grade',
-                          ),
-                          items: _grades
-                              .map((grade) {
-                                final id = int.tryParse(grade['id'].toString());
-
-                                final name =
-                                    (grade['name'] ??
-                                            grade['grade_name'] ??
-                                            'Grade')
-                                        .toString();
-
-                                return DropdownMenuItem<int>(
-                                  value: id,
-                                  child: Text(name),
-                                );
-                              })
-                              .where((item) => item.value != null)
-                              .toList(),
-                          onChanged: (value) {
-                            setState(() {
-                              _gradeId = value;
-                              _alStream = null;
-                            });
-                          },
-                          validator: (value) {
-                            if (value == null) {
-                              return 'Please select your grade';
-                            }
-                            return null;
-                          },
-                        ),
-
-                      // A/L STREAM
-                      if (_isALGrade) ...[
-                        const SizedBox(height: 20),
-
-                        _fieldLabel('A/L Stream'),
-
-                        const SizedBox(height: 8),
-
-                        DropdownButtonFormField<String>(
-                          value: _alStream,
-                          isExpanded: true,
-                          decoration: _inputDecoration(
-                            hint: 'Select your A/L stream',
-                          ),
-                          items: _alStreams.map((stream) {
-                            return DropdownMenuItem<String>(
-                              value: stream['value'],
-                              child: Text(stream['label']!),
-                            );
-                          }).toList(),
-                          onChanged: (value) {
-                            setState(() {
-                              _alStream = value;
-                            });
-                          },
-                          validator: (value) {
-                            if (value == null) {
-                              return 'Please select your A/L stream';
-                            }
-                            return null;
-                          },
-                        ),
-                      ],
-
-                      const SizedBox(height: 20),
-
-                      _fieldLabel('School Name (Optional)'),
-
-                      const SizedBox(height: 8),
-
-                      TextFormField(
-                        controller: _schoolController,
-                        decoration: _inputDecoration(
-                          hint: 'Enter your school name',
-                          prefixIcon: Icons.account_balance_outlined,
-                        ),
-                      ),
-                    ],
-
-                    // DISTRICT
-                    if (_userCategory != null) ...[
-                      const SizedBox(height: 24),
-
-                      _fieldLabel('Your District'),
-
-                      const SizedBox(height: 8),
-
-                      DropdownButtonFormField<String>(
-                        value: _district,
-                        isExpanded: true,
-                        decoration: _inputDecoration(
-                          hint: 'Select your district',
-                          prefixIcon: Icons.location_on_outlined,
-                        ),
-                        items: _districts.map((district) {
-                          return DropdownMenuItem(
-                            value: district,
-                            child: Text(district),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() {
-                            _district = value;
-                          });
-                        },
-                        validator: (value) {
-                          if (value == null) {
-                            return 'Please select your district';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-
-                    if (_errorMessage != null) ...[
-                      const SizedBox(height: 15),
-                      Text(
-                        _errorMessage!,
-                        style: const TextStyle(color: Colors.red, fontSize: 13),
-                      ),
-                    ],
-
-                    const SizedBox(height: 32),
-
-                    // CONTINUE BUTTON
-                    SizedBox(
-                      width: double.infinity,
-                      height: 54,
-                      child: ElevatedButton(
-                        onPressed:
-                            _submitting ||
-                                _userCategory == null ||
-                                (_userCategory == 'Student' && _loadingGrades)
-                            ? null
-                            : _completeOnboarding,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: primaryColor,
-                          disabledBackgroundColor: primaryColor.withOpacity(
-                            0.4,
-                          ),
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        child: _submitting
-                            ? const SizedBox(
-                                height: 22,
-                                width: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    'Complete Profile',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  SizedBox(width: 10),
-                                  Icon(Icons.arrow_forward_rounded),
-                                ],
-                              ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    const Center(
-                      child: Text(
-                        'You can update your profile details later.',
-                        style: TextStyle(fontSize: 12, color: Colors.black45),
-                      ),
-                    ),
-
-                    const SizedBox(height: 20),
-                  ],
-                ),
+            const Text(
+              'I am a',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: QL.ink,
               ),
             ),
-          ),
+            const SizedBox(height: 12),
+            _CategoryCard(
+              title: 'Student',
+              subtitle: 'Grade 5 to A/L, studying at school.',
+              icon: Icons.school_rounded,
+              selected: _userCategory == _kStudent,
+              onTap: () => _selectCategory(_kStudent),
+            ),
+            const SizedBox(height: 12),
+            _CategoryCard(
+              title: 'Government Exam Candidate',
+              subtitle: 'SLAS, banking, teacher, forces and more.',
+              icon: Icons.assignment_rounded,
+              selected: _userCategory == _kGovCandidate,
+              onTap: () => _selectCategory(_kGovCandidate),
+            ),
+
+            // ── Student fields ──
+            if (isStudent) ...[
+              const SizedBox(height: 26),
+              const QLFieldLabel('Your grade'),
+              const SizedBox(height: 6),
+              _buildGradeField(),
+              if (_isALGrade) ...[
+                const SizedBox(height: 16),
+                const QLFieldLabel('A/L stream'),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<String>(
+                  // ignore: deprecated_member_use
+                  value: _alStream,
+                  isExpanded: true,
+                  menuMaxHeight: 320,
+                  style: qlInputStyle,
+                  decoration: qlFieldDecoration(
+                    hint: 'Select your A/L stream',
+                    icon: Icons.science_outlined,
+                  ),
+                  items: [
+                    for (final s in _alStreams)
+                      DropdownMenuItem<String>(
+                        value: s['value'],
+                        child: Text(s['label']!),
+                      ),
+                  ],
+                  onChanged: (v) => setState(() => _alStream = v),
+                  validator: (v) =>
+                      v == null ? 'Please select your A/L stream' : null,
+                ),
+              ],
+              const SizedBox(height: 16),
+              const QLFieldLabel('School name (optional)'),
+              const SizedBox(height: 6),
+              TextFormField(
+                controller: _schoolController,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.done,
+                style: qlInputStyle,
+                cursorColor: QL.blue,
+                decoration: qlFieldDecoration(
+                  hint: 'Enter your school name',
+                  icon: Icons.account_balance_outlined,
+                ),
+              ),
+            ],
+
+            // ── District ──
+            if (_userCategory != null) ...[
+              const SizedBox(height: 16),
+              const QLFieldLabel('Your district'),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String>(
+                // ignore: deprecated_member_use
+                value: _district,
+                isExpanded: true,
+                menuMaxHeight: 320,
+                style: qlInputStyle,
+                decoration: qlFieldDecoration(
+                  hint: 'Select your district',
+                  icon: Icons.location_on_outlined,
+                ),
+                items: [
+                  for (final d in _districts)
+                    DropdownMenuItem<String>(value: d, child: Text(d)),
+                ],
+                onChanged: (v) => setState(() => _district = v),
+                validator: (v) =>
+                    v == null ? 'Please select your district' : null,
+              ),
+            ],
+
+            const SizedBox(height: 26),
+            QLPrimaryButton(
+              label: 'Complete profile',
+              isLoading: _submitting,
+              enabled: _userCategory != null && !(isStudent && _loadingGrades),
+              onTap: _completeOnboarding,
+            ),
+
+            const Spacer(),
+            const SizedBox(height: 18),
+            const Center(
+              child: Text(
+                'You can update your profile details later.',
+                style: TextStyle(fontSize: 12.5, color: QL.muted),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  // ==============================
-  // REUSABLE WIDGETS
-  // ==============================
-
-  Widget _sectionTitle(String title) {
-    return Text(
-      title,
-      style: const TextStyle(
-        fontSize: 17,
-        fontWeight: FontWeight.bold,
-        color: Color(0xFF20213A),
-      ),
-    );
-  }
-
-  Widget _fieldLabel(String label) {
-    return Text(
-      label,
-      style: const TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-        color: Color(0xFF36364A),
-      ),
-    );
-  }
-
-  InputDecoration _inputDecoration({
-    required String hint,
-    IconData? prefixIcon,
-  }) {
-    return InputDecoration(
-      hintText: hint,
-      prefixIcon: prefixIcon == null ? null : Icon(prefixIcon),
-      filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(13),
-        borderSide: const BorderSide(color: Color(0xFFE5E5EF)),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(13),
-        borderSide: const BorderSide(color: Color(0xFFE5E5EF)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(13),
-        borderSide: const BorderSide(color: Color(0xFF5B4BDB), width: 1.5),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(13),
-        borderSide: const BorderSide(color: Colors.red),
-      ),
-    );
-  }
-
-  Widget _categoryCard({
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    const primaryColor = Color(0xFF5B4BDB);
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(15),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: selected ? primaryColor.withOpacity(0.07) : Colors.white,
-          borderRadius: BorderRadius.circular(15),
-          border: Border.all(
-            color: selected ? primaryColor : const Color(0xFFE5E5EF),
-            width: selected ? 1.5 : 1,
+  Widget _buildGradeField() {
+    if (_loadingGrades) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 18),
+        child: Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2.5, color: QL.blue),
           ),
+        ),
+      );
+    }
+
+    if (_gradesFailed) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+        decoration: BoxDecoration(
+          color: QL.dangerBg,
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: selected
-                    ? primaryColor.withOpacity(0.12)
-                    : const Color(0xFFF1F1F7),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                icon,
-                color: selected ? primaryColor : Colors.black54,
-                size: 24,
+            const Icon(Icons.error_outline_rounded, color: QL.danger, size: 20),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Grades could not be loaded.',
+                style: TextStyle(
+                  color: QL.danger,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
-
-            const SizedBox(width: 14),
-
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF20213A),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                ],
+            TextButton(
+              onPressed: _fetchGrades,
+              style: TextButton.styleFrom(
+                foregroundColor: QL.danger,
+                minimumSize: const Size(56, 44),
               ),
-            ),
-
-            Icon(
-              selected ? Icons.radio_button_checked : Icons.radio_button_off,
-              color: selected ? primaryColor : Colors.black26,
+              child: const Text(
+                'Retry',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ],
+        ),
+      );
+    }
+
+    final items = <DropdownMenuItem<int>>[];
+    for (final g in _grades) {
+      final id = int.tryParse('${g['id']}');
+      if (id == null) continue;
+      items.add(DropdownMenuItem<int>(value: id, child: Text(_gradeName(g))));
+    }
+
+    return DropdownButtonFormField<int>(
+      // ignore: deprecated_member_use
+      value: _gradeId,
+      isExpanded: true,
+      menuMaxHeight: 320,
+      style: qlInputStyle,
+      decoration: qlFieldDecoration(
+        hint: 'Choose your grade',
+        icon: Icons.format_list_numbered_rounded,
+      ),
+      items: items,
+      onChanged: (v) => setState(() {
+        _gradeId = v;
+        _alStream = null;
+      }),
+      validator: (v) => v == null ? 'Please select your grade' : null,
+    );
+  }
+
+  // ==============================
+  // HEADER
+  // ==============================
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 12, 12, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const QLBrandMark(size: 38, fontSize: 18),
+              TextButton.icon(
+                onPressed: _submitting ? null : _logout,
+                style: TextButton.styleFrom(
+                  foregroundColor: QL.ice,
+                  minimumSize: const Size(44, 44),
+                ),
+                icon: const Icon(Icons.logout_rounded, size: 18),
+                label: const Text(
+                  'Log out',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          const Padding(
+            padding: EdgeInsets.only(top: 14, right: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Almost there',
+                  style: TextStyle(
+                    color: QL.gold,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  "Let's set up your profile",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Tell us a little about yourself so we can personalise '
+                  'your QuizLanka AI experience.',
+                  style: TextStyle(color: QL.ice, fontSize: 14, height: 1.5),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================
+// CATEGORY CARD
+// ============================================================
+class _CategoryCard extends StatelessWidget {
+  const _CategoryCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: title,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(QL.fieldRadius + 2),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFFEAF0FF) : QL.fieldFill,
+            borderRadius: BorderRadius.circular(QL.fieldRadius + 2),
+            border: Border.all(
+              color: selected ? QL.blue : QL.border,
+              width: selected ? 2 : 1.5,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: selected ? QL.blue : QL.navy,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: QL.gold, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: QL.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: QL.muted,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_off_rounded,
+                color: selected ? QL.blue : QL.hint,
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -1,23 +1,48 @@
 // dashboard_screen.dart
-// ============================================================
-// 1. IMPORTS
-// ============================================================
+// QuizLanka AI — Student / Candidate dashboard (navy + gold design)
+
 import 'dart:async';
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:quiz_lanka/Login.dart';
+import 'package:quiz_lanka/Login.dart' show TokenStorage, LoginScreen;
 import 'package:quiz_lanka/ProfileScreen.dart';
+import 'package:quiz_lanka/QL.dart';
 import 'package:quiz_lanka/config/api_config.dart';
+import 'package:quiz_lanka/past_paper_subject_selection_screen.dart';
 import 'package:quiz_lanka/quiz_history_screen.dart';
 import 'package:quiz_lanka/subjects_screen.dart';
-import 'package:quiz_lanka/past_paper_subject_selection_screen.dart';
 
 // ============================================================
-// 2. MODELS
+// 1. SMALL PARSING HELPERS
 // ============================================================
+int _toInt(dynamic v, [int fallback = 0]) {
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v) ?? fallback;
+  return fallback;
+}
 
+int? _toNullableInt(dynamic v) {
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v);
+  return null;
+}
+
+double _toDouble(dynamic v) {
+  if (v is num) return v.isFinite ? v.toDouble() : 0;
+  if (v is String) return double.tryParse(v) ?? 0;
+  return 0;
+}
+
+String _clean(Object e) => e.toString().replaceFirst('Exception: ', '');
+
+// ============================================================
+// 2. MODELS (same JSON contract as before)
+// ============================================================
 class Grade {
   final int id;
   final String name;
@@ -25,7 +50,7 @@ class Grade {
   Grade({required this.id, required this.name});
 
   factory Grade.fromJson(Map<String, dynamic> json) =>
-      Grade(id: json['id'] as int, name: json['name'] as String);
+      Grade(id: _toInt(json['id']), name: (json['name'] ?? '').toString());
 
   Map<String, dynamic> toJson() => {'id': id, 'name': name};
 }
@@ -53,34 +78,30 @@ class User {
 
   factory User.fromJson(Map<String, dynamic> json) {
     String? avatarUrl;
-    if (json['display_avatar'] != null &&
-        json['display_avatar'].toString().isNotEmpty) {
-      avatarUrl = json['display_avatar'].toString();
-    } else if (json['profile_image'] != null &&
-        json['profile_image'].toString().isNotEmpty) {
-      avatarUrl = json['profile_image'].toString();
-    } else if (json['avatar_url'] != null &&
-        json['avatar_url'].toString().isNotEmpty) {
-      avatarUrl = json['avatar_url'].toString();
-    } else if (json['avatar'] != null && json['avatar'].toString().isNotEmpty) {
-      avatarUrl = json['avatar'].toString();
-    } else if (json['profile_photo'] != null &&
-        json['profile_photo'].toString().isNotEmpty) {
-      avatarUrl = json['profile_photo'].toString();
+    for (final key in const [
+      'display_avatar',
+      'profile_image',
+      'avatar_url',
+      'avatar',
+      'profile_photo',
+    ]) {
+      final v = json[key];
+      if (v != null && v.toString().isNotEmpty) {
+        avatarUrl = v.toString();
+        break;
+      }
     }
 
     Grade? parsedGrade;
     final rawGrade = json['grade'];
-    if (rawGrade is Map<String, dynamic> &&
-        rawGrade['id'] is int &&
-        rawGrade['name'] is String) {
+    if (rawGrade is Map<String, dynamic> && rawGrade['id'] != null) {
       parsedGrade = Grade.fromJson(rawGrade);
     }
 
     return User(
-      id: json['id'] as int,
-      name: json['name'] as String,
-      email: json['email'] as String,
+      id: _toInt(json['id']),
+      name: (json['name'] ?? '').toString(),
+      email: (json['email'] ?? '').toString(),
       school: json['school'] is String ? json['school'] as String : null,
       district: json['district'] is String ? json['district'] as String : null,
       grade: parsedGrade,
@@ -91,15 +112,12 @@ class User {
     );
   }
 
-  /// Normalized category string used for comparisons.
-  String get _normalizedCategory {
-    return (userCategory ?? '')
-        .trim()
-        .toLowerCase()
-        .replaceAll('_', ' ')
-        .replaceAll('-', ' ')
-        .replaceAll(RegExp(r'\s+'), ' ');
-  }
+  String get _normalizedCategory => (userCategory ?? '')
+      .trim()
+      .toLowerCase()
+      .replaceAll('_', ' ')
+      .replaceAll('-', ' ')
+      .replaceAll(RegExp(r'\s+'), ' ');
 
   bool get isStudent => _normalizedCategory == 'student';
 
@@ -112,15 +130,15 @@ class User {
         c == 'government';
   }
 
-  /// A user is treated as a government exam candidate when either the
-  /// explicit category matches OR they have no grade (students always do).
-  bool get _treatAsGovernment => isGovernmentExamCandidate || grade == null;
+  /// Government candidate: explicit category, or no category and no grade.
+  bool get _treatAsGovernment =>
+      isGovernmentExamCandidate || (grade == null && !isStudent);
 
   String get subtitleLabel {
     if (_treatAsGovernment) {
-      return district != null && district!.isNotEmpty
-          ? '🎯 Government Exam Candidate · $district'
-          : '🎯 Government Exam Candidate';
+      return (district != null && district!.isNotEmpty)
+          ? 'Government Exam Candidate · $district'
+          : 'Government Exam Candidate';
     }
     final g = grade;
     if (g != null) {
@@ -131,44 +149,28 @@ class User {
     return district ?? 'QuizLanka AI learner';
   }
 
-  /// Returns one of: 'grade5' | 'ol' | 'al' | 'government'.
-  /// Never returns null so the dashboard always renders exactly ONE tile.
+  /// 'grade5' | 'ol' | 'al' | 'government' | 'general'
+  /// 'general' = a student in Grade 6–9 (no past-paper category exists).
   String get pastPaperCategory {
-    // 1. Explicit government category (or no grade → government).
     if (_treatAsGovernment) return 'government';
 
-    final gradeName = grade?.name.trim().toLowerCase() ?? '';
+    final name = grade?.name.trim().toLowerCase() ?? '';
+    final n = int.tryParse(RegExp(r'\d+').firstMatch(name)?.group(0) ?? '');
 
-    // 2. Grade 5 / Scholarship
-    if (gradeName.contains('grade 5') ||
-        gradeName.contains('grade-5') ||
-        gradeName.contains('grade_5') ||
-        gradeName.contains('grade 05') ||
-        gradeName == '5' ||
-        gradeName.contains('scholarship')) {
-      return 'grade5';
-    }
-
-    // 3. O/L — Grade 10 & 11
-    if (gradeName.contains('grade 10') ||
-        gradeName.contains('grade 11') ||
-        gradeName.contains('ordinary') ||
-        gradeName.contains('o/l') ||
-        gradeName.contains('ol')) {
+    if (n == 5 || name.contains('scholarship')) return 'grade5';
+    if (n == 10 ||
+        n == 11 ||
+        name.contains('ordinary') ||
+        name.contains('o/l')) {
       return 'ol';
     }
-
-    // 4. A/L — Grade 12 & 13
-    if (gradeName.contains('grade 12') ||
-        gradeName.contains('grade 13') ||
-        gradeName.contains('advanced') ||
-        gradeName.contains('a/l') ||
-        gradeName.contains('al')) {
+    if (n == 12 ||
+        n == 13 ||
+        name.contains('advanced') ||
+        name.contains('a/l')) {
       return 'al';
     }
-
-    // 5. Has a grade but none of the known categories → gov fallback.
-    return 'government';
+    return 'general';
   }
 }
 
@@ -189,37 +191,14 @@ class Stats {
     this.notificationsCount,
   });
 
-  factory Stats.fromJson(Map<String, dynamic> json) {
-    int _asInt(dynamic v) {
-      if (v is int) return v;
-      if (v is num) return v.toInt();
-      if (v is String) return int.tryParse(v) ?? 0;
-      return 0;
-    }
-
-    double _asDouble(dynamic v) {
-      if (v is double) return v.isFinite ? v : 0;
-      if (v is num) return v.toDouble();
-      if (v is String) return double.tryParse(v) ?? 0;
-      return 0;
-    }
-
-    int? _asNullableInt(dynamic v) {
-      if (v is int) return v;
-      if (v is num) return v.toInt();
-      if (v is String) return int.tryParse(v);
-      return null;
-    }
-
-    return Stats(
-      selectedSubjects: _asInt(json['selected_subjects']),
-      completedQuizzes: _asInt(json['completed_quizzes']),
-      averageScore: _asDouble(json['average_score']),
-      xpPoints: _asNullableInt(json['xp_points']),
-      streakDays: _asNullableInt(json['streak_days']),
-      notificationsCount: _asNullableInt(json['notifications_count']),
-    );
-  }
+  factory Stats.fromJson(Map<String, dynamic> json) => Stats(
+    selectedSubjects: _toInt(json['selected_subjects']),
+    completedQuizzes: _toInt(json['completed_quizzes']),
+    averageScore: _toDouble(json['average_score']),
+    xpPoints: _toNullableInt(json['xp_points']),
+    streakDays: _toNullableInt(json['streak_days']),
+    notificationsCount: _toNullableInt(json['notifications_count']),
+  );
 }
 
 class Subject {
@@ -237,24 +216,13 @@ class Subject {
     this.questionsCount,
   });
 
-  factory Subject.fromJson(Map<String, dynamic> json) {
-    int? _asNullableInt(dynamic v) {
-      if (v is int) return v;
-      if (v is num) return v.toInt();
-      if (v is String) return int.tryParse(v);
-      return null;
-    }
-
-    return Subject(
-      id: json['id'] is int
-          ? json['id'] as int
-          : int.tryParse('${json['id']}') ?? 0,
-      name: (json['name'] as String?) ?? 'Unknown Subject',
-      icon: json['icon'] as String?,
-      color: (json['color'] as String?) ?? '#2563EB',
-      questionsCount: _asNullableInt(json['questions_count']),
-    );
-  }
+  factory Subject.fromJson(Map<String, dynamic> json) => Subject(
+    id: _toInt(json['id']),
+    name: (json['name'] as String?) ?? 'Unknown Subject',
+    icon: json['icon'] as String?,
+    color: (json['color'] as String?) ?? '#2563EB',
+    questionsCount: _toNullableInt(json['questions_count']),
+  );
 
   Color get flutterColor {
     try {
@@ -287,13 +255,15 @@ class ContinueLearning {
 
   factory ContinueLearning.fromJson(Map<String, dynamic> json) =>
       ContinueLearning(
-        quizId: json['quiz_id'] as int,
-        subject: Subject.fromJson(json['subject'] as Map<String, dynamic>),
-        lastScore: json['last_score'] as int,
-        lastPercentage: (json['last_percentage'] as num).toDouble(),
-        completedAt: json['completed_at'] as String,
-        recommendedQuizCount: json['recommended_quiz_count'] as int?,
-        minutesLeft: json['minutes_left'] as int?,
+        quizId: _toInt(json['quiz_id']),
+        subject: Subject.fromJson(
+          (json['subject'] as Map?)?.cast<String, dynamic>() ?? {},
+        ),
+        lastScore: _toInt(json['last_score']),
+        lastPercentage: _toDouble(json['last_percentage']),
+        completedAt: (json['completed_at'] ?? '').toString(),
+        recommendedQuizCount: _toNullableInt(json['recommended_quiz_count']),
+        minutesLeft: _toNullableInt(json['minutes_left']),
       );
 }
 
@@ -315,12 +285,14 @@ class RecentQuiz {
   });
 
   factory RecentQuiz.fromJson(Map<String, dynamic> json) => RecentQuiz(
-    id: json['id'] as int,
-    subject: Subject.fromJson(json['subject'] as Map<String, dynamic>),
-    quizType: json['quiz_type'] as String,
-    score: json['score'] as int,
-    percentage: (json['percentage'] as num).toDouble(),
-    completedAt: json['completed_at'] as String,
+    id: _toInt(json['id']),
+    subject: Subject.fromJson(
+      (json['subject'] as Map?)?.cast<String, dynamic>() ?? {},
+    ),
+    quizType: (json['quiz_type'] ?? '').toString(),
+    score: _toInt(json['score']),
+    percentage: _toDouble(json['percentage']),
+    completedAt: (json['completed_at'] ?? '').toString(),
   );
 }
 
@@ -343,20 +315,7 @@ class DashboardModel {
 
   factory DashboardModel.fromJson(Map<String, dynamic> json) {
     final rawRecent = json['recent_quizzes'];
-    final recentList = rawRecent is List
-        ? rawRecent
-              .whereType<Map<String, dynamic>>()
-              .map(RecentQuiz.fromJson)
-              .toList()
-        : <RecentQuiz>[];
-
     final rawSubjects = json['subjects'];
-    final subjectList = rawSubjects is List
-        ? rawSubjects
-              .whereType<Map<String, dynamic>>()
-              .map(Subject.fromJson)
-              .toList()
-        : <Subject>[];
 
     return DashboardModel(
       success: json['success'] as bool? ?? false,
@@ -369,8 +328,18 @@ class DashboardModel {
               json['continue_learning'] as Map<String, dynamic>,
             )
           : null,
-      subjects: subjectList,
-      recentQuizzes: recentList,
+      subjects: rawSubjects is List
+          ? rawSubjects
+                .whereType<Map<String, dynamic>>()
+                .map(Subject.fromJson)
+                .toList()
+          : <Subject>[],
+      recentQuizzes: rawRecent is List
+          ? rawRecent
+                .whereType<Map<String, dynamic>>()
+                .map(RecentQuiz.fromJson)
+                .toList()
+          : <RecentQuiz>[],
     );
   }
 }
@@ -378,247 +347,102 @@ class DashboardModel {
 // ============================================================
 // 3. SERVICE
 // ============================================================
+class SessionExpiredException implements Exception {
+  @override
+  String toString() => 'Your session has expired. Please log in again.';
+}
 
 class DashboardService {
   final http.Client _client = http.Client();
+  static const Duration _timeout = Duration(seconds: 15);
 
-  Future<DashboardModel> getDashboard() async {
+  Future<Map<String, dynamic>> _get(String url) async {
     final token = await TokenStorage.getToken();
-
-    if (token == null || token.isEmpty) {
-      throw Exception('Authentication token not found.');
-    }
+    if (token == null || token.isEmpty) throw SessionExpiredException();
 
     http.Response response;
     try {
       response = await _client
-          .get(
-            Uri.parse('${ApiConfig.baseUrl}${ApiConfig.dashboard}'),
-            headers: ApiConfig.getHeaders(token),
-          )
-          .timeout(const Duration(seconds: 15));
+          .get(Uri.parse(url), headers: ApiConfig.getHeaders(token))
+          .timeout(_timeout);
     } on TimeoutException {
       throw Exception('The request timed out. Please try again.');
     } on SocketException {
       throw Exception('No internet connection. Please check your network.');
-    } on HttpException {
+    } on http.ClientException {
       throw Exception('Could not reach the server. Please try again.');
-    } on FormatException {
-      throw Exception('Invalid server response. Please try again.');
-    }
-
-    Map<String, dynamic> data;
-    try {
-      data = jsonDecode(response.body) as Map<String, dynamic>;
-    } on FormatException {
-      throw Exception('Received an invalid response from the server.');
-    }
-
-    if (response.statusCode == 200 && data['success'] == true) {
-      return DashboardModel.fromJson(data);
     }
 
     if (response.statusCode == 401) {
       await TokenStorage.clearAll();
-      throw Exception('Session expired. Please login again.');
+      throw SessionExpiredException();
     }
 
     if (response.statusCode >= 500) {
       throw Exception('Server error. Please try again later.');
     }
 
-    throw Exception(data['message'] ?? 'Failed to load dashboard.');
-  }
-
-  Future<List<Subject>> getSubjects() async {
-    final token = await TokenStorage.getToken();
-
-    if (token == null || token.isEmpty) {
-      throw Exception('Authentication token not found.');
-    }
-
-    http.Response response;
-    try {
-      response = await _client
-          .get(
-            Uri.parse('${ApiConfig.baseUrl}/subjects'),
-            headers: ApiConfig.getHeaders(token),
-          )
-          .timeout(const Duration(seconds: 15));
-    } on TimeoutException {
-      throw Exception('The request timed out. Please try again.');
-    } on SocketException {
-      throw Exception('No internet connection. Please check your network.');
-    } on HttpException {
-      throw Exception('Could not reach the server. Please try again.');
-    } on FormatException {
-      throw Exception('Invalid server response. Please try again.');
-    }
-
     Map<String, dynamic> data;
     try {
       data = jsonDecode(response.body) as Map<String, dynamic>;
-    } on FormatException {
+    } catch (_) {
       throw Exception('Received an invalid response from the server.');
     }
 
-    if (response.statusCode == 200 && data['success'] == true) {
-      final subjectsList = data['subjects'];
-      if (subjectsList == null || subjectsList is! List) {
-        throw Exception('Invalid subjects data received from server.');
-      }
-      return subjectsList
-          .whereType<Map<String, dynamic>>()
-          .map(Subject.fromJson)
-          .toList();
-    }
+    if (response.statusCode == 200 && data['success'] == true) return data;
 
-    if (response.statusCode == 401) {
-      await TokenStorage.clearAll();
-      throw Exception('Session expired. Please login again.');
-    }
-
-    throw Exception(data['message'] ?? 'Failed to load subjects.');
+    throw Exception(data['message'] ?? 'Request failed.');
   }
 
-  void dispose() {
-    _client.close();
+  Future<DashboardModel> getDashboard() async {
+    final data = await _get('${ApiConfig.baseUrl}${ApiConfig.dashboard}');
+    return DashboardModel.fromJson(data);
   }
+
+  Future<List<Subject>> getSubjects() async {
+    final data = await _get('${ApiConfig.baseUrl}/subjects');
+    final list = data['subjects'];
+    if (list is! List) {
+      throw Exception('Invalid subjects data received from server.');
+    }
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(Subject.fromJson)
+        .toList();
+  }
+
+  void dispose() => _client.close();
 }
 
 // ============================================================
-// 4. DESIGN TOKENS
+// 4. LOCAL LOOK
 // ============================================================
+class _D {
+  _D._();
 
-class _Palette {
-  _Palette._();
+  static const Color bg = Color(0xFFF1F5FC);
+  static const Color success = Color(0xFF1B7F4B);
+  static const Color tint = Color(0xFFEAF0FF);
 
-  static const String backgroundAsset = 'assets/appHeader.png';
+  static BoxDecoration card({double radius = 22}) => BoxDecoration(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: const Color(0xFFDCE4F4)),
+    boxShadow: const [
+      BoxShadow(color: Color(0x14123066), blurRadius: 14, offset: Offset(0, 6)),
+    ],
+  );
 
-  static const Color violet = Color(0xFF7C3AED);
-  static const Color violetDeep = Color(0xFF4C2E8F);
-  static const Color blue = Color(0xFF2563EB);
-  static const Color cyan = Color(0xFF06B6D4);
-  static const Color gold = Color(0xFFF59E0B);
+  static double hPad(BuildContext c) =>
+      MediaQuery.sizeOf(c).width >= 600 ? 36 : 20;
 
-  static const List<Color> ctaGradient = [violet, blue];
-  static const List<Color> battleGradient = [violetDeep, violet, blue];
-
-  static const Color scaffold = Color(0xFFEAF1FB);
-  static const Color cardWhite = Color(0xFFF6FAFF);
-  static const Color border = Color(0xFFDCE7F7);
-
-  static const Color textPrimary = Color(0xFF181B34);
-  static const Color textSecondary = Color(0xFF6B7086);
-
-  static const Color textOnPhoto = Colors.white;
-  static const Color textOnPhotoMuted = Color(0xFFE3E1FA);
-
-  static const Color success = Color(0xFF16A34A);
-  static const Color danger = Color(0xFFEF4444);
-
-  static BoxDecoration card({double radius = 22, Color? tint}) {
-    return BoxDecoration(
-      color: tint ?? cardWhite,
-      borderRadius: BorderRadius.circular(radius),
-      border: Border.all(color: border),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x16232B6B),
-          blurRadius: 14,
-          offset: Offset(0, 6),
-        ),
-      ],
-    );
-  }
-}
-
-// ============================================================
-// 4b. RESPONSIVE HELPERS
-// ============================================================
-
-enum _DeviceType { compactPhone, phone, tablet, desktop }
-
-class _Responsive {
-  _Responsive._();
-
-  static double width(BuildContext context) => MediaQuery.sizeOf(context).width;
-
-  static _DeviceType deviceType(BuildContext context) {
-    final w = width(context);
-    if (w >= 1024) return _DeviceType.desktop;
-    if (w >= 600) return _DeviceType.tablet;
-    if (w < 340) return _DeviceType.compactPhone;
-    return _DeviceType.phone;
-  }
-
-  static bool isTabletUp(BuildContext context) => width(context) >= 600;
-
-  static double horizontalPadding(BuildContext context) {
-    switch (deviceType(context)) {
-      case _DeviceType.desktop:
-        return 56;
-      case _DeviceType.tablet:
-        return 36;
-      case _DeviceType.phone:
-      case _DeviceType.compactPhone:
-        return 20;
-    }
-  }
-
-  static double maxContentWidth(BuildContext context) {
-    switch (deviceType(context)) {
-      case _DeviceType.desktop:
-        return 900;
-      case _DeviceType.tablet:
-        return 680;
-      case _DeviceType.phone:
-      case _DeviceType.compactPhone:
-        return double.infinity;
-    }
-  }
-
-  static double heroHeight(BuildContext context) {
-    switch (deviceType(context)) {
-      case _DeviceType.desktop:
-        return 340;
-      case _DeviceType.tablet:
-        return 310;
-      case _DeviceType.phone:
-      case _DeviceType.compactPhone:
-        return 275;
-    }
-  }
-
-  static double scale(BuildContext context, double base) {
-    switch (deviceType(context)) {
-      case _DeviceType.desktop:
-        return base * 1.15;
-      case _DeviceType.tablet:
-        return base * 1.08;
-      case _DeviceType.phone:
-        return base;
-      case _DeviceType.compactPhone:
-        return base * 0.94;
-    }
-  }
-
-  static double avatarRadius(BuildContext context, double base) {
-    switch (deviceType(context)) {
-      case _DeviceType.desktop:
-      case _DeviceType.tablet:
-        return base * 1.15;
-      case _DeviceType.phone:
-      case _DeviceType.compactPhone:
-        return base;
-    }
-  }
+  static double maxWidth(BuildContext c) =>
+      MediaQuery.sizeOf(c).width >= 600 ? 680 : double.infinity;
 }
 
 // ============================================================
 // 5. DASHBOARD SCREEN
 // ============================================================
-
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -629,14 +453,21 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen>
     with AutomaticKeepAliveClientMixin {
   final DashboardService _service = DashboardService();
-  late Future<DashboardModel> _dashboardFuture;
-  late Future<List<Subject>> _subjectsFuture;
+
+  DashboardModel? _dashboard;
+  List<Subject>? _subjects;
+  String? _error;
+  String? _subjectsError;
+  bool _sessionExpired = false;
+  bool _loading = true;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _dashboardFuture = _service.getDashboard();
-    _subjectsFuture = _service.getSubjects();
+    _load();
   }
 
   @override
@@ -645,45 +476,92 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.dispose();
   }
 
-  void _refresh() {
+  Future<({List<Subject>? data, String? error})> _safeSubjects() async {
+    try {
+      return (data: await _service.getSubjects(), error: null);
+    } catch (e) {
+      return (data: null, error: _clean(e));
+    }
+  }
+
+  /// Loads both endpoints in parallel. Existing content stays on screen
+  /// while refreshing, so pull-to-refresh never flashes a spinner.
+  Future<void> _load() async {
+    if (_dashboard == null) setState(() => _loading = true);
+
+    final subjectsFuture = _safeSubjects();
+
+    try {
+      final d = await _service.getDashboard();
+      if (!mounted) return;
+      setState(() {
+        _dashboard = d;
+        _error = null;
+        _sessionExpired = false;
+      });
+    } on SessionExpiredException {
+      if (!mounted) return;
+      setState(() {
+        _sessionExpired = true;
+        _error = SessionExpiredException().toString();
+        _dashboard = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      if (_dashboard == null) {
+        setState(() => _error = _clean(e));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: QL.danger,
+            content: Text(_clean(e)),
+          ),
+        );
+      }
+    }
+
+    final s = await subjectsFuture;
+    if (!mounted) return;
     setState(() {
-      _dashboardFuture = _service.getDashboard();
-      _subjectsFuture = _service.getSubjects();
+      if (s.data != null) _subjects = s.data;
+      _subjectsError = s.error;
+      _loading = false;
     });
+  }
+
+  Future<void> _reloadSubjects() async {
+    setState(() => _subjectsError = null);
+    final s = await _safeSubjects();
+    if (!mounted) return;
+    setState(() {
+      if (s.data != null) _subjects = s.data;
+      _subjectsError = s.error;
+    });
+  }
+
+  void _goToLogin() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   String _greeting() {
     final hour = DateTime.now().hour;
-    if (hour < 12) return 'Good Morning';
-    if (hour < 17) return 'Good Afternoon';
-    return 'Good Evening';
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
   }
 
-  void _navigateToProfile(User user) {
+  void _push(Widget page) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => ProfileScreen(key: ValueKey(user.id))),
-    ).then((_) => _refresh());
+      MaterialPageRoute(builder: (_) => page),
+    ).then((_) => _load());
   }
 
-  void _navigateToSubjects() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const SubjectsScreen()),
-    ).then((_) => _refresh());
-  }
-
-  void _navigateToHistory() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const QuizHistoryScreen()),
-    ).then((_) => _refresh());
-  }
-
-  void _navigateToPastPapers({
-    required String category,
-    required String title,
-  }) {
+  void _openPastPapers(String category, String title) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -694,206 +572,206 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   @override
-  bool get wantKeepAlive => true;
-
-  @override
   Widget build(BuildContext context) {
     super.build(context);
 
-    return Scaffold(
-      backgroundColor: _Palette.scaffold,
-      body: FutureBuilder<DashboardModel>(
-        future: _dashboardFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(
-                color: _Palette.violet,
-                strokeWidth: 2.5,
-              ),
-            );
-          }
+    return Scaffold(backgroundColor: _D.bg, body: _buildBody());
+  }
 
-          if (snapshot.hasError) {
-            return _ErrorView(
-              message: snapshot.error.toString(),
-              onRetry: _refresh,
-            );
-          }
+  Widget _buildBody() {
+    if (_loading && _dashboard == null) {
+      return const Center(
+        child: CircularProgressIndicator(color: QL.blue, strokeWidth: 2.5),
+      );
+    }
 
-          final data = snapshot.data!;
+    final data = _dashboard;
+    if (data == null) {
+      return _ErrorView(
+        message: _error ?? 'Something went wrong.',
+        sessionExpired: _sessionExpired,
+        onRetry: _load,
+        onLogin: _goToLogin,
+      );
+    }
 
-          final hPad = _Responsive.horizontalPadding(context);
-          final maxWidth = _Responsive.maxContentWidth(context);
+    final hPad = _D.hPad(context);
 
-          return RefreshIndicator(
-            onRefresh: () async => _refresh(),
-            color: _Palette.violet,
-            child: _FadeInOnLoad(
-              child: ListView(
-                padding: const EdgeInsets.only(bottom: 28),
-                physics: const AlwaysScrollableScrollPhysics(
-                  parent: BouncingScrollPhysics(),
-                ),
-                children: [
-                  _HeroHeader(
-                    user: data.user,
-                    greeting: _greeting(),
-                    xp: data.stats.xpPoints,
-                    streakDays: data.stats.streakDays,
-                    notificationsCount: data.stats.notificationsCount,
-                    onAvatarTap: () => _navigateToProfile(data.user),
-                    onBellTap: _navigateToHistory,
-                  ),
-                  Transform.translate(
-                    offset: const Offset(0, -22),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: maxWidth),
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(horizontal: hPad),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (data.continueLearning != null)
-                                _ContinueLearningCard(
-                                  data: data.continueLearning!,
-                                  onResume: _navigateToSubjects,
-                                )
-                              else
-                                _StatsSummaryCard(stats: data.stats),
-                              const SizedBox(height: 26),
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  _SectionTitle(_quickAccessTitle(data.user)),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              _QuickAccessRow(
-                                user: data.user,
-                                onPastPapers: _navigateToPastPapers,
-                              ),
-                              const SizedBox(height: 26),
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const _SectionTitle('Subjects'),
-                                  _ViewAllButton(onTap: _navigateToSubjects),
-                                ],
-                              ),
-                              const SizedBox(height: 14),
-                              FutureBuilder<List<Subject>>(
-                                future: _subjectsFuture,
-                                builder: (context, subjectSnapshot) {
-                                  if (subjectSnapshot.connectionState ==
-                                      ConnectionState.waiting) {
-                                    return Container(
-                                      height: 100,
-                                      decoration: _Palette.card(radius: 18),
-                                      child: const Center(
-                                        child: CircularProgressIndicator(
-                                          color: _Palette.violet,
-                                          strokeWidth: 2.5,
-                                        ),
-                                      ),
-                                    );
-                                  }
-
-                                  if (subjectSnapshot.hasError) {
-                                    return Container(
-                                      width: double.infinity,
-                                      padding: const EdgeInsets.all(20),
-                                      decoration: _Palette.card(radius: 18),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.error_outline_rounded,
-                                            size: 32,
-                                            color: _Palette.danger,
-                                          ),
-                                          const SizedBox(height: 8),
-                                          const Text(
-                                            'Failed to load subjects',
-                                            style: TextStyle(
-                                              color: _Palette.textSecondary,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          GestureDetector(
-                                            onTap: () {
-                                              setState(() {
-                                                _subjectsFuture = _service
-                                                    .getSubjects();
-                                              });
-                                            },
-                                            child: const Text(
-                                              'Retry',
-                                              style: TextStyle(
-                                                color: _Palette.violet,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  }
-
-                                  final subjects = subjectSnapshot.data ?? [];
-                                  return _SubjectsRow(
-                                    subjects: subjects,
-                                    onSubjectTap: _navigateToSubjects,
-                                  );
-                                },
-                              ),
-                              const SizedBox(height: 26),
-                              _LiveQuizBattleCard(
-                                user: data.user,
-                                userXp: data.stats.xpPoints ?? 0,
-                                onStartBattle: _navigateToSubjects,
-                              ),
-                              const SizedBox(height: 26),
-                              const _SectionTitle('Your Recent Activity'),
-                              const SizedBox(height: 12),
-                              _PersonalLeaderboardCard(
-                                user: data.user,
-                                stats: data.stats,
-                                recentQuizzes: data.recentQuizzes,
-                                onViewAll: _navigateToHistory,
-                              ),
-                            ],
+    return RefreshIndicator(
+      onRefresh: _load,
+      color: QL.blue,
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 40),
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        children: [
+          _HeroHeader(
+            user: data.user,
+            greeting: _greeting(),
+            xp: data.stats.xpPoints,
+            streakDays: data.stats.streakDays,
+            notificationsCount: data.stats.notificationsCount,
+            onAvatarTap: () =>
+                _push(ProfileScreen(key: ValueKey(data.user.id))),
+            onBellTap: () => _push(const QuizHistoryScreen()),
+          ),
+          Transform.translate(
+            offset: const Offset(0, -26),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: _D.maxWidth(context)),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: hPad),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (data.continueLearning != null)
+                        _ContinueLearningCard(
+                          data: data.continueLearning!,
+                          onResume: () => _push(const SubjectsScreen()),
+                        )
+                      else
+                        _StatsSummaryCard(stats: data.stats),
+                      const SizedBox(height: 26),
+                      _SectionTitle(_quickAccessTitle(data.user)),
+                      const SizedBox(height: 12),
+                      _buildQuickAccess(data.user),
+                      const SizedBox(height: 26),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const _SectionTitle('Subjects'),
+                          _ViewAllButton(
+                            onTap: () => _push(const SubjectsScreen()),
                           ),
-                        ),
+                        ],
                       ),
-                    ),
+                      const SizedBox(height: 8),
+                      _buildSubjects(),
+                      const SizedBox(height: 26),
+                      const _BattleComingSoonCard(),
+                      const SizedBox(height: 26),
+                      const _SectionTitle('Your recent activity'),
+                      const SizedBox(height: 12),
+                      _RecentActivityCard(
+                        user: data.user,
+                        stats: data.stats,
+                        recentQuizzes: data.recentQuizzes,
+                        onViewAll: () => _push(const QuizHistoryScreen()),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
 
-  /// Title shown above the Quick Access row — reflects the user's category.
   String _quickAccessTitle(User user) {
     switch (user.pastPaperCategory) {
       case 'grade5':
-        return 'Grade 5 Past Papers';
+        return 'Grade 5 past papers';
       case 'ol':
-        return 'O/L Past Papers';
+        return 'O/L past papers';
       case 'al':
-        return 'A/L Past Papers';
-      case 'government':
+        return 'A/L past papers';
+      case 'general':
+        return 'Quick practice';
       default:
-        return 'Government Exam Papers';
+        return 'Government exam papers';
     }
+  }
+
+  Widget _buildQuickAccess(User user) {
+    switch (user.pastPaperCategory) {
+      case 'grade5':
+        return _QuickAccessTile(
+          icon: Icons.grade_rounded,
+          title: 'Grade 5 Scholarship',
+          subtitle: 'Practise real past papers',
+          onTap: () => _openPastPapers('primary', 'Grade 5 Past Papers'),
+        );
+      case 'ol':
+        return _QuickAccessTile(
+          icon: Icons.quiz_rounded,
+          title: 'O/L Past Papers',
+          subtitle: 'Practise real past papers',
+          onTap: () => _openPastPapers('ol', 'O/L Past Papers'),
+        );
+      case 'al':
+        return _QuickAccessTile(
+          icon: Icons.school_rounded,
+          title: 'A/L Past Papers',
+          subtitle: 'Practise real past papers',
+          onTap: () => _openPastPapers('al', 'A/L Past Papers'),
+        );
+      case 'general':
+        return _QuickAccessTile(
+          icon: Icons.bolt_rounded,
+          title: 'Practise by subject',
+          subtitle: 'Pick a subject and start a quiz',
+          onTap: () => _push(const SubjectsScreen()),
+        );
+      default:
+        return _QuickAccessTile(
+          icon: Icons.assignment_rounded,
+          title: 'Government Exam Papers',
+          subtitle: 'Practise real past papers',
+          onTap: () =>
+              _openPastPapers('government', 'Government Exam Past Papers'),
+        );
+    }
+  }
+
+  Widget _buildSubjects() {
+    if (_subjects == null && _subjectsError == null) {
+      return Container(
+        height: 100,
+        decoration: _D.card(radius: 18),
+        child: const Center(
+          child: CircularProgressIndicator(color: QL.blue, strokeWidth: 2.5),
+        ),
+      );
+    }
+
+    if (_subjects == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: _D.card(radius: 18),
+        child: Column(
+          children: [
+            const Icon(Icons.error_outline_rounded, size: 30, color: QL.danger),
+            const SizedBox(height: 8),
+            Text(
+              _subjectsError ?? 'Failed to load subjects',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: QL.muted, fontSize: 13),
+            ),
+            TextButton(
+              onPressed: _reloadSubjects,
+              style: TextButton.styleFrom(
+                foregroundColor: QL.blue,
+                minimumSize: const Size(64, 44),
+              ),
+              child: const Text(
+                'Retry',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return _SubjectsRow(
+      subjects: _subjects!,
+      onSubjectTap: () => _push(const SubjectsScreen()),
+    );
   }
 }
 
@@ -901,111 +779,68 @@ class _DashboardScreenState extends State<DashboardScreen>
 // 6. WIDGETS
 // ============================================================
 
-class _FadeInOnLoad extends StatelessWidget {
-  const _FadeInOnLoad({required this.child});
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 550),
-      curve: Curves.easeOutCubic,
-      builder: (context, value, child) {
-        return Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset(0, (1 - value) * 18),
-            child: child,
-          ),
-        );
-      },
-      child: child,
-    );
-  }
-}
-
 class _ErrorView extends StatelessWidget {
-  final String message;
-  final VoidCallback onRetry;
+  const _ErrorView({
+    required this.message,
+    required this.sessionExpired,
+    required this.onRetry,
+    required this.onLogin,
+  });
 
-  const _ErrorView({required this.message, required this.onRetry});
+  final String message;
+  final bool sessionExpired;
+  final VoidCallback onRetry;
+  final VoidCallback onLogin;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: _Palette.scaffold,
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    color: _Palette.danger.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.error_outline_rounded,
-                    size: 36,
-                    color: _Palette.danger,
-                  ),
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: const BoxDecoration(
+                  color: QL.dangerBg,
+                  shape: BoxShape.circle,
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  'Unable to load dashboard',
-                  style: TextStyle(
-                    fontSize: _Responsive.scale(context, 18),
-                    fontWeight: FontWeight.w800,
-                    color: _Palette.textPrimary,
-                  ),
+                child: Icon(
+                  sessionExpired
+                      ? Icons.lock_outline_rounded
+                      : Icons.cloud_off_rounded,
+                  size: 34,
+                  color: QL.danger,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  message.replaceFirst('Exception: ', ''),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: _Palette.textSecondary,
-                    fontSize: 14,
-                  ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                sessionExpired ? 'Session expired' : 'Unable to load dashboard',
+                style: const TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                  color: QL.ink,
                 ),
-                const SizedBox(height: 24),
-                GestureDetector(
-                  onTap: onRetry,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 14,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: _Palette.ctaGradient,
-                      ),
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _Palette.violet.withValues(alpha: 0.32),
-                          blurRadius: 16,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: const Text(
-                      'Retry',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: QL.muted, fontSize: 14),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: 200,
+                child: QLPrimaryButton(
+                  label: sessionExpired ? 'Log in' : 'Retry',
+                  onTap: sessionExpired ? onLogin : onRetry,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1014,14 +849,6 @@ class _ErrorView extends StatelessWidget {
 }
 
 class _HeroHeader extends StatelessWidget {
-  final User user;
-  final String greeting;
-  final int? xp;
-  final int? streakDays;
-  final int? notificationsCount;
-  final VoidCallback onAvatarTap;
-  final VoidCallback onBellTap;
-
   const _HeroHeader({
     required this.user,
     required this.greeting,
@@ -1032,267 +859,167 @@ class _HeroHeader extends StatelessWidget {
     required this.onBellTap,
   });
 
+  final User user;
+  final String greeting;
+  final int? xp;
+  final int? streakDays;
+  final int? notificationsCount;
+  final VoidCallback onAvatarTap;
+  final VoidCallback onBellTap;
+
   @override
   Widget build(BuildContext context) {
-    final hPad = _Responsive.horizontalPadding(context);
-    final maxWidth = _Responsive.maxContentWidth(context);
+    final hPad = _D.hPad(context);
 
     return ClipRRect(
-      borderRadius: const BorderRadius.only(
-        bottomLeft: Radius.circular(32),
-        bottomRight: Radius.circular(32),
-      ),
-      child: SizedBox(
-        height: _Responsive.heroHeight(context),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.asset(
-              _Palette.backgroundAsset,
-              fit: BoxFit.cover,
-              alignment: Alignment.topCenter,
-              errorBuilder: (context, error, stack) => const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [_Palette.violetDeep, Color(0xFF14132F)],
+      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(32)),
+      child: Stack(
+        children: [
+          const Positioned.fill(child: QLBackdrop()),
+          SafeArea(
+            bottom: false,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: _D.maxWidth(context)),
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(hPad, 12, hPad, 48),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: QLBrandMark(size: 38, fontSize: 17),
+                            ),
+                          ),
+                          _NotificationBell(
+                            count: notificationsCount,
+                            onTap: onBellTap,
+                          ),
+                          const SizedBox(width: 10),
+                          _AvatarButton(user: user, onTap: onAvatarTap),
+                        ],
+                      ),
+                      const SizedBox(height: 22),
+                      Text(
+                        greeting,
+                        style: const TextStyle(
+                          color: QL.gold,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        user.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        user.subtitleLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: QL.ice, fontSize: 13),
+                      ),
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _HeroStatChip(
+                              icon: Icons.auto_awesome_rounded,
+                              value: xp != null ? '$xp' : '—',
+                              label: 'Total XP',
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _HeroStatChip(
+                              icon: Icons.local_fire_department_rounded,
+                              value: streakDays != null ? '$streakDays' : '—',
+                              label: 'Day streak',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ),
             ),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Color(0x552D1B69),
-                    Color(0x77120B2E),
-                    Color(0x77120B2E),
-                    _Palette.scaffold,
-                    _Palette.scaffold,
-                  ],
-                  stops: [0.0, 0.45, 0.84, 0.94, 1.0],
-                ),
-              ),
-            ),
-            SafeArea(
-              bottom: false,
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: maxWidth),
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(hPad, 12, hPad, 20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Expanded(child: _AppLogo()),
-                            _NotificationBell(
-                              count: notificationsCount,
-                              onTap: onBellTap,
-                            ),
-                            const SizedBox(width: 12),
-                            _AvatarButton(user: user, onTap: onAvatarTap),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-                        Text(
-                          greeting,
-                          style: TextStyle(
-                            color: _Palette.textOnPhotoMuted,
-                            fontSize: _Responsive.scale(context, 13),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                user.name,
-                                style: TextStyle(
-                                  fontSize: _Responsive.scale(context, 26),
-                                  fontWeight: FontWeight.w900,
-                                  color: _Palette.textOnPhoto,
-                                  letterSpacing: -0.5,
-                                  shadows: const [
-                                    Shadow(
-                                      color: Colors.black45,
-                                      blurRadius: 12,
-                                      offset: Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            const Text('👋', style: TextStyle(fontSize: 22)),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          user.subtitleLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: _Palette.textOnPhotoMuted,
-                            fontSize: 12.5,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 50, top: 10),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: _HeroStatChip(
-                                  icon: Icons.auto_awesome_rounded,
-                                  iconColor: _Palette.gold,
-                                  value: xp != null ? '$xp' : '—',
-                                  label: 'Total XP',
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: _HeroStatChip(
-                                  icon: Icons.local_fire_department_rounded,
-                                  iconColor: const Color(0xFFFF7A45),
-                                  value: streakDays != null
-                                      ? '$streakDays'
-                                      : '—',
-                                  label: 'Day Streak',
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
-    );
-  }
-}
-
-class _AppLogo extends StatelessWidget {
-  const _AppLogo();
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: _Palette.ctaGradient),
-            borderRadius: BorderRadius.circular(11),
-            boxShadow: [
-              BoxShadow(
-                color: _Palette.violet.withValues(alpha: 0.45),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: const Icon(
-            Icons.psychology_alt_rounded,
-            color: Colors.white,
-            size: 19,
-          ),
-        ),
-        const SizedBox(width: 9),
-        RichText(
-          text: TextSpan(
-            style: TextStyle(
-              fontSize: _Responsive.scale(context, 16.5),
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.2,
-            ),
-            children: const [
-              TextSpan(
-                text: 'QuizLanka ',
-                style: TextStyle(color: Colors.white),
-              ),
-              TextSpan(
-                text: 'AI',
-                style: TextStyle(color: _Palette.cyan),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }
 
 class _NotificationBell extends StatelessWidget {
+  const _NotificationBell({required this.count, required this.onTap});
+
   final int? count;
   final VoidCallback onTap;
-
-  const _NotificationBell({required this.count, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final hasBadge = count != null && count! > 0;
-    final size = _Responsive.avatarRadius(context, 40);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.16),
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
-        ),
-        child: Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.center,
-          children: [
-            const Icon(
-              Icons.notifications_rounded,
-              color: Colors.white,
-              size: 19,
-            ),
-            if (hasBadge)
-              Positioned(
-                top: -2,
-                right: -2,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 5,
-                    vertical: 1,
-                  ),
-                  constraints: const BoxConstraints(minWidth: 17),
-                  decoration: BoxDecoration(
-                    color: _Palette.danger,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: _Palette.violetDeep, width: 1.5),
-                  ),
-                  child: Text(
-                    count! > 9 ? '9+' : '$count',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w800,
-                      height: 1.2,
+
+    return Semantics(
+      button: true,
+      label: hasBadge ? 'Notifications, $count new' : 'Notifications',
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: const BoxDecoration(
+            color: QL.navyDeep,
+            shape: BoxShape.circle,
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              const Icon(
+                Icons.notifications_rounded,
+                color: Colors.white,
+                size: 22,
+              ),
+              if (hasBadge)
+                Positioned(
+                  top: 3,
+                  right: 1,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    constraints: const BoxConstraints(minWidth: 18),
+                    decoration: BoxDecoration(
+                      color: QL.gold,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: QL.navy, width: 1.5),
+                    ),
+                    child: Text(
+                      count! > 9 ? '9+' : '$count',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: QL.navy,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        height: 1.4,
+                      ),
                     ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1300,49 +1027,42 @@ class _NotificationBell extends StatelessWidget {
 }
 
 class _AvatarButton extends StatelessWidget {
+  const _AvatarButton({required this.user, required this.onTap});
+
   final User user;
   final VoidCallback onTap;
 
-  const _AvatarButton({required this.user, required this.onTap});
-
   @override
   Widget build(BuildContext context) {
-    final radius = _Responsive.avatarRadius(context, 19);
+    final hasImage = user.avatarUrl != null && user.avatarUrl!.isNotEmpty;
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(2.5),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: const LinearGradient(
-            colors: [_Palette.violet, _Palette.cyan],
+    return Semantics(
+      button: true,
+      label: 'Open profile',
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          padding: const EdgeInsets.all(2.5),
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: QL.gold,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: _Palette.violet.withValues(alpha: 0.5),
-              blurRadius: 16,
-              spreadRadius: 1,
-            ),
-          ],
-        ),
-        child: CircleAvatar(
-          radius: radius,
-          backgroundColor: const Color(0xFF201E4A),
-          backgroundImage:
-              (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
-              ? NetworkImage(user.avatarUrl!)
-              : null,
-          child: (user.avatarUrl == null || user.avatarUrl!.isEmpty)
-              ? Text(
-                  user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
+          child: CircleAvatar(
+            radius: 19,
+            backgroundColor: QL.navyLight,
+            backgroundImage: hasImage ? NetworkImage(user.avatarUrl!) : null,
+            child: hasImage
+                ? null
+                : Text(
+                    user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
-                )
-              : null,
+          ),
         ),
       ),
     );
@@ -1350,50 +1070,47 @@ class _AvatarButton extends StatelessWidget {
 }
 
 class _HeroStatChip extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String value;
-  final String label;
-
   const _HeroStatChip({
     required this.icon,
-    required this.iconColor,
     required this.value,
     required this.label,
   });
+
+  final IconData icon;
+  final String value;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.16),
+        color: QL.navyLight,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
       ),
       child: Row(
         children: [
-          Icon(icon, color: iconColor, size: 20),
+          Icon(icon, color: QL.gold, size: 22),
           const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                value,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: _Responsive.scale(context, 16),
-                  fontWeight: FontWeight.w800,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: _Palette.textOnPhotoMuted,
-                  fontSize: 10.5,
+                Text(
+                  label,
+                  style: const TextStyle(color: QL.ice, fontSize: 11.5),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -1402,76 +1119,37 @@ class _HeroStatChip extends StatelessWidget {
 }
 
 class _ContinueLearningCard extends StatelessWidget {
+  const _ContinueLearningCard({required this.data, required this.onResume});
+
   final ContinueLearning data;
   final VoidCallback onResume;
-
-  const _ContinueLearningCard({required this.data, required this.onResume});
 
   @override
   Widget build(BuildContext context) {
     final color = data.subject.flutterColor;
     final progress = (data.lastPercentage / 100).clamp(0.0, 1.0);
-    final isTabletUp = _Responsive.isTabletUp(context);
 
     return Container(
-      padding: EdgeInsets.all(isTabletUp ? 22 : 18),
-      decoration: _Palette.card(radius: 26),
+      padding: const EdgeInsets.all(18),
+      decoration: _D.card(radius: 26),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Stack(
-                children: [
-                  Container(
-                    width: 58,
-                    height: 58,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [color, color.withValues(alpha: 0.55)],
-                      ),
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: [
-                        BoxShadow(
-                          color: color.withValues(alpha: 0.35),
-                          blurRadius: 14,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.auto_stories_rounded,
-                      color: Colors.white,
-                      size: 27,
-                    ),
-                  ),
-                  Positioned(
-                    top: -4,
-                    left: -4,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _Palette.violet,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white, width: 1.5),
-                      ),
-                      child: const Text(
-                        'AI',
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: const Icon(
+                  Icons.auto_stories_rounded,
+                  color: Colors.white,
+                  size: 26,
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -1479,20 +1157,20 @@ class _ContinueLearningCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Continue Learning',
+                      'Continue learning',
                       style: TextStyle(
-                        fontSize: 12,
-                        color: _Palette.violet,
+                        fontSize: 12.5,
+                        color: QL.blue,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       data.subject.name,
-                      style: TextStyle(
-                        fontSize: _Responsive.scale(context, 17),
+                      style: const TextStyle(
+                        fontSize: 18,
                         fontWeight: FontWeight.w800,
-                        color: _Palette.textPrimary,
+                        color: QL.ink,
                       ),
                     ),
                   ],
@@ -1505,7 +1183,7 @@ class _ContinueLearningCard extends StatelessWidget {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: _Palette.scaffold,
+                    color: _D.tint,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
@@ -1513,16 +1191,16 @@ class _ContinueLearningCard extends StatelessWidget {
                     children: [
                       const Icon(
                         Icons.schedule_rounded,
-                        size: 13,
-                        color: _Palette.textSecondary,
+                        size: 14,
+                        color: QL.muted,
                       ),
                       const SizedBox(width: 4),
                       Text(
                         '${data.minutesLeft} min left',
                         style: const TextStyle(
-                          fontSize: 10.5,
+                          fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: _Palette.textSecondary,
+                          color: QL.muted,
                         ),
                       ),
                     ],
@@ -1536,9 +1214,9 @@ class _ContinueLearningCard extends StatelessWidget {
               'AI recommends ${data.recommendedQuizCount} quizzes based on '
               'your weak areas.',
               style: const TextStyle(
-                fontSize: 12,
-                color: _Palette.textSecondary,
-                height: 1.3,
+                fontSize: 12.5,
+                color: QL.muted,
+                height: 1.4,
               ),
             ),
           ],
@@ -1547,19 +1225,19 @@ class _ContinueLearningCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                'Progress',
+                'Last score',
                 style: TextStyle(
-                  fontSize: 11.5,
+                  fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: _Palette.violet,
+                  color: QL.muted,
                 ),
               ),
               Text(
                 '${data.lastPercentage.toStringAsFixed(0)}%',
                 style: const TextStyle(
-                  fontSize: 11.5,
+                  fontSize: 12,
                   fontWeight: FontWeight.w800,
-                  color: _Palette.textPrimary,
+                  color: QL.ink,
                 ),
               ),
             ],
@@ -1569,44 +1247,13 @@ class _ContinueLearningCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             child: LinearProgressIndicator(
               value: progress,
-              minHeight: 7,
-              backgroundColor: color.withValues(alpha: 0.12),
-              valueColor: const AlwaysStoppedAnimation(_Palette.blue),
+              minHeight: 8,
+              backgroundColor: _D.tint,
+              valueColor: const AlwaysStoppedAnimation(QL.blue),
             ),
           ),
-          const SizedBox(height: 14),
-          GestureDetector(
-            onTap: onResume,
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: _Palette.ctaGradient),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: _Palette.violet.withValues(alpha: 0.35),
-                    blurRadius: 16,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'Resume',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14.5,
-                    ),
-                  ),
-                  SizedBox(width: 6),
-                  Icon(Icons.play_arrow_rounded, color: Colors.white, size: 18),
-                ],
-              ),
-            ),
-          ),
+          const SizedBox(height: 16),
+          QLPrimaryButton(label: 'Resume', onTap: onResume),
         ],
       ),
     );
@@ -1614,22 +1261,20 @@ class _ContinueLearningCard extends StatelessWidget {
 }
 
 class _StatsSummaryCard extends StatelessWidget {
-  final Stats stats;
-
   const _StatsSummaryCard({required this.stats});
+
+  final Stats stats;
 
   @override
   Widget build(BuildContext context) {
-    final isTabletUp = _Responsive.isTabletUp(context);
     return Container(
-      padding: EdgeInsets.all(isTabletUp ? 24 : 20),
-      decoration: _Palette.card(radius: 26),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
+      decoration: _D.card(radius: 26),
       child: Row(
         children: [
           Expanded(
             child: _SummaryStat(
               icon: Icons.menu_book_rounded,
-              color: _Palette.violet,
               value: '${stats.selectedSubjects}',
               label: 'Subjects',
             ),
@@ -1637,7 +1282,6 @@ class _StatsSummaryCard extends StatelessWidget {
           Expanded(
             child: _SummaryStat(
               icon: Icons.quiz_rounded,
-              color: _Palette.blue,
               value: '${stats.completedQuizzes}',
               label: 'Quizzes',
             ),
@@ -1645,9 +1289,8 @@ class _StatsSummaryCard extends StatelessWidget {
           Expanded(
             child: _SummaryStat(
               icon: Icons.trending_up_rounded,
-              color: _Palette.success,
               value: '${stats.averageScore.toStringAsFixed(0)}%',
-              label: 'Avg Score',
+              label: 'Avg score',
             ),
           ),
         ],
@@ -1657,17 +1300,15 @@ class _StatsSummaryCard extends StatelessWidget {
 }
 
 class _SummaryStat extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String value;
-  final String label;
-
   const _SummaryStat({
     required this.icon,
-    required this.color,
     required this.value,
     required this.label,
   });
+
+  final IconData icon;
+  final String value;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -1675,175 +1316,99 @@ class _SummaryStat extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 40,
-          height: 40,
+          width: 44,
+          height: 44,
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(12),
+            color: _D.tint,
+            borderRadius: BorderRadius.circular(14),
           ),
-          child: Icon(icon, color: color, size: 20),
+          child: Icon(icon, color: QL.blue, size: 22),
         ),
         const SizedBox(height: 8),
         Text(
           value,
-          style: TextStyle(
-            fontSize: _Responsive.scale(context, 16),
+          style: const TextStyle(
+            fontSize: 18,
             fontWeight: FontWeight.w800,
-            color: _Palette.textPrimary,
+            color: QL.ink,
           ),
         ),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 11, color: _Palette.textSecondary),
-        ),
+        Text(label, style: const TextStyle(fontSize: 12, color: QL.muted)),
       ],
     );
   }
 }
 
-// ------------------------------------------------------------
-// Quick Access — ALWAYS renders exactly ONE tile based on
-// User.pastPaperCategory (which never returns null).
-// ------------------------------------------------------------
-typedef _QuickAccessItem = ({
-  IconData icon,
-  String label,
-  String sub,
-  List<Color> colors,
-  VoidCallback onTap,
-});
-
-class _QuickAccessRow extends StatelessWidget {
-  final User user;
-  final void Function({required String category, required String title})
-  onPastPapers;
-
-  const _QuickAccessRow({required this.user, required this.onPastPapers});
-
-  @override
-  Widget build(BuildContext context) {
-    final Map<String, _QuickAccessItem> catalogue = {
-      'grade5': (
-        icon: Icons.grade_rounded,
-        label: 'Grade 5',
-        sub: 'Past Papers',
-        colors: const [Color(0xFF7C3AED), Color(0xFF9333EA)],
-        onTap: () =>
-            onPastPapers(category: 'primary', title: 'Grade 5 Past Papers'),
-      ),
-      'ol': (
-        icon: Icons.quiz_rounded,
-        label: 'O/L',
-        sub: 'Past Papers',
-        colors: const [Color(0xFF2563EB), Color(0xFF1D4ED8)],
-        onTap: () => onPastPapers(category: 'ol', title: 'O/L Past Papers'),
-      ),
-      'al': (
-        icon: Icons.school_rounded,
-        label: 'A/L',
-        sub: 'Past Papers',
-        colors: const [Color(0xFFF59E0B), Color(0xFFEA580C)],
-        onTap: () => onPastPapers(category: 'al', title: 'A/L Past Papers'),
-      ),
-      'government': (
-        icon: Icons.assignment_rounded,
-        label: 'GOV',
-        sub: 'Past Papers',
-        colors: const [Color(0xFF14B8A6), Color(0xFF0D9488)],
-        onTap: () => onPastPapers(
-          category: 'government',
-          title: 'Government Exam Past Papers',
-        ),
-      ),
-    };
-
-    // pastPaperCategory is guaranteed non-null now.
-    final category = user.pastPaperCategory;
-    final item = catalogue[category] ?? catalogue['government']!;
-
-    return _QuickAccessTile(item: item);
-  }
-}
-
 class _QuickAccessTile extends StatelessWidget {
-  final _QuickAccessItem item;
-  const _QuickAccessTile({required this.item});
+  const _QuickAccessTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final isTabletUp = _Responsive.isTabletUp(context);
-    return GestureDetector(
-      onTap: item.onTap,
-      child: Container(
-        padding: EdgeInsets.all(isTabletUp ? 16 : 14),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: item.colors,
-          ),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: item.colors.first.withValues(alpha: 0.32),
-              blurRadius: 10,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Center(
-              child: Container(
-                width: 32,
-                height: 32,
+    return Semantics(
+      button: true,
+      label: title,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: _D.card(radius: 20),
+          child: Row(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.22),
-                  borderRadius: BorderRadius.circular(8),
+                  color: QL.navy,
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: Center(
-                  child: Icon(item.icon, color: Colors.white, size: 16),
+                child: Icon(icon, color: QL.gold, size: 26),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                        color: QL.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(fontSize: 12.5, color: QL.muted),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Center(
-              child: Text(
-                item.label,
-                style: TextStyle(
-                  fontSize: _Responsive.scale(context, 14),
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-            Center(
-              child: Text(
-                item.sub,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.white.withValues(alpha: 0.85),
-                ),
-              ),
-            ),
-          ],
+              const Icon(Icons.arrow_forward_rounded, color: QL.blue),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-// ------------------------------------------------------------
-// Subjects row
-// ------------------------------------------------------------
 class _SubjectsRow extends StatelessWidget {
+  const _SubjectsRow({required this.subjects, required this.onSubjectTap});
+
   final List<Subject> subjects;
   final VoidCallback onSubjectTap;
-
-  const _SubjectsRow({required this.subjects, required this.onSubjectTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1851,28 +1416,23 @@ class _SubjectsRow extends StatelessWidget {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(20),
-        decoration: _Palette.card(radius: 18),
+        decoration: _D.card(radius: 18),
         child: const Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.school_outlined,
-              size: 40,
-              color: _Palette.textSecondary,
-            ),
-            SizedBox(height: 12),
+            Icon(Icons.school_outlined, size: 38, color: QL.muted),
+            SizedBox(height: 10),
             Text(
-              'No Subjects Available',
+              'No subjects available',
               style: TextStyle(
-                color: _Palette.textSecondary,
+                color: QL.ink,
                 fontSize: 15,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
               ),
             ),
             SizedBox(height: 4),
             Text(
               'Please check back later',
-              style: TextStyle(color: _Palette.textSecondary, fontSize: 12),
+              style: TextStyle(color: QL.muted, fontSize: 12.5),
             ),
           ],
         ),
@@ -1883,34 +1443,20 @@ class _SubjectsRow extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 340;
+        // 2 per row on narrow screens, otherwise all in one row.
+        final perRow = constraints.maxWidth < 340 ? 2 : displayed.length;
+        final tileWidth = (constraints.maxWidth - 10 * (perRow - 1)) / perRow;
 
-        if (compact) {
-          final tileWidth = (constraints.maxWidth - 10) / 2;
-          return Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: displayed
-                .map(
-                  (s) => SizedBox(
-                    width: tileWidth,
-                    child: _SubjectTile(subject: s, onTap: onSubjectTap),
-                  ),
-                )
-                .toList(),
-          );
-        }
-
-        return Row(
-          children: List.generate(displayed.length, (i) {
-            final isLast = i == displayed.length - 1;
-            return Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(right: isLast ? 0 : 10),
-                child: _SubjectTile(subject: displayed[i], onTap: onSubjectTap),
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final s in displayed)
+              SizedBox(
+                width: tileWidth,
+                child: _SubjectTile(subject: s, onTap: onSubjectTap),
               ),
-            );
-          }),
+          ],
         );
       },
     );
@@ -1918,273 +1464,146 @@ class _SubjectsRow extends StatelessWidget {
 }
 
 class _SubjectTile extends StatelessWidget {
+  const _SubjectTile({required this.subject, required this.onTap});
+
   final Subject subject;
   final VoidCallback onTap;
 
-  const _SubjectTile({required this.subject, required this.onTap});
-
-  IconData _iconForSubject() {
-    final name = subject.name.toLowerCase();
-    if (name.contains('math')) return Icons.calculate_outlined;
-    if (name.contains('science')) return Icons.science_outlined;
-    if (name.contains('english')) return Icons.menu_book_outlined;
-    if (name.contains('sinhala')) return Icons.translate_rounded;
-    if (name.contains('tamil')) return Icons.translate_rounded;
-    if (name.contains('ict') || name.contains('comput')) {
+  IconData _icon() {
+    final n = subject.name.toLowerCase();
+    if (n.contains('math')) return Icons.calculate_outlined;
+    if (n.contains('science')) return Icons.science_outlined;
+    if (n.contains('english')) return Icons.menu_book_outlined;
+    if (n.contains('sinhala') ||
+        n.contains('tamil') ||
+        n.contains('language')) {
+      return Icons.translate_rounded;
+    }
+    if (n.contains('ict') || n.contains('comput'))
       return Icons.computer_outlined;
-    }
-    if (name.contains('history')) return Icons.account_balance_outlined;
-    if (name.contains('commerce')) return Icons.bar_chart_rounded;
-    if (name.contains('bio')) return Icons.eco_outlined;
-    if (name.contains('physic')) return Icons.bolt_outlined;
-    if (name.contains('chem')) return Icons.science_rounded;
-    if (name.contains('geo')) return Icons.public_outlined;
-    if (name.contains('art')) return Icons.palette_outlined;
-    if (name.contains('qa') || name.contains('aptitude')) {
+    if (n.contains('history')) return Icons.account_balance_outlined;
+    if (n.contains('commerce')) return Icons.bar_chart_rounded;
+    if (n.contains('bio')) return Icons.eco_outlined;
+    if (n.contains('physic')) return Icons.bolt_outlined;
+    if (n.contains('chem')) return Icons.science_rounded;
+    if (n.contains('geo')) return Icons.public_outlined;
+    if (n.contains('art')) return Icons.palette_outlined;
+    if (n.contains('qa') || n.contains('aptitude'))
       return Icons.psychology_outlined;
-    }
-    if (name.contains('language')) return Icons.translate_rounded;
     return Icons.school_outlined;
   }
 
   @override
   Widget build(BuildContext context) {
     final color = subject.flutterColor;
-    final isTabletUp = _Responsive.isTabletUp(context);
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          vertical: isTabletUp ? 20 : 16,
-          horizontal: 8,
-        ),
-        decoration: _Palette.card(radius: 18),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
+    return Semantics(
+      button: true,
+      label: subject.name,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
+          decoration: _D.card(radius: 18),
+          child: Column(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(_icon(), color: color, size: 23),
               ),
-              child: Icon(_iconForSubject(), color: color, size: 22),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              subject.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: _Responsive.scale(context, 12),
-                fontWeight: FontWeight.w700,
-                color: _Palette.textPrimary,
-              ),
-            ),
-            if (subject.questionsCount != null)
+              const SizedBox(height: 10),
               Text(
-                '${subject.questionsCount} Qs',
+                subject.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
                 style: const TextStyle(
-                  fontSize: 10,
-                  color: _Palette.textSecondary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: QL.ink,
                 ),
               ),
-          ],
+              if (subject.questionsCount != null)
+                Text(
+                  '${subject.questionsCount} Qs',
+                  style: const TextStyle(fontSize: 11, color: QL.muted),
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _LiveQuizBattleCard extends StatelessWidget {
-  final User user;
-  final int userXp;
-  final VoidCallback onStartBattle;
-
-  const _LiveQuizBattleCard({
-    required this.user,
-    required this.userXp,
-    required this.onStartBattle,
-  });
+/// Real-time battles are a planned feature (not in the backend yet), so this
+/// card is honest about it instead of showing a fake "Matching…" opponent.
+class _BattleComingSoonCard extends StatelessWidget {
+  const _BattleComingSoonCard();
 
   @override
   Widget build(BuildContext context) {
-    final isTabletUp = _Responsive.isTabletUp(context);
     return Container(
-      padding: EdgeInsets.all(isTabletUp ? 24 : 20),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: _Palette.battleGradient,
+          colors: [QL.navy, QL.navyDeep],
         ),
         borderRadius: BorderRadius.circular(26),
-        boxShadow: [
-          BoxShadow(
-            color: _Palette.violet.withValues(alpha: 0.32),
-            blurRadius: 22,
-            offset: const Offset(0, 12),
-          ),
-        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: const Icon(Icons.bolt_rounded, color: Colors.white),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Live Quiz Battle',
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: QL.gold,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.bolt_rounded, color: QL.navy, size: 28),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Live quiz battles',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: _Responsive.scale(context, 16),
+                    fontSize: 16.5,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Challenge students in real time and earn XP',
-            style: TextStyle(color: _Palette.textOnPhotoMuted, fontSize: 12.5),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    _BattleAvatar(
-                      initial: user.name.isNotEmpty
-                          ? user.name[0].toUpperCase()
-                          : '?',
-                      avatarUrl: user.avatarUrl,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      user.name,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '$userXp XP',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
+                SizedBox(height: 3),
+                Text(
+                  'Challenge classmates in real time and earn XP.',
+                  style: TextStyle(color: QL.ice, fontSize: 12.5, height: 1.4),
                 ),
-              ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  'VS',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  children: [
-                    const _BattleAvatar(initial: '?', avatarUrl: null),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Find opponent',
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: _Palette.textOnPhotoMuted,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text(
-                        'Matching…',
-                        style: TextStyle(
-                          color: _Palette.textOnPhotoMuted,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 20),
-          GestureDetector(
-            onTap: onStartBattle,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 13),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'Start Battle',
-                    style: TextStyle(
-                      color: _Palette.violetDeep,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14,
-                    ),
-                  ),
-                  SizedBox(width: 4),
-                  Icon(
-                    Icons.bolt_rounded,
-                    color: _Palette.violetDeep,
-                    size: 18,
-                  ),
-                ],
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: QL.gold,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Text(
+              'Soon',
+              style: TextStyle(
+                color: QL.navy,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ),
@@ -2194,113 +1613,68 @@ class _LiveQuizBattleCard extends StatelessWidget {
   }
 }
 
-class _BattleAvatar extends StatelessWidget {
-  final String initial;
-  final String? avatarUrl;
-
-  const _BattleAvatar({required this.initial, required this.avatarUrl});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: Colors.white.withValues(alpha: 0.18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.4)),
-      ),
-      child: CircleAvatar(
-        radius: _Responsive.avatarRadius(context, 26),
-        backgroundColor: Colors.white.withValues(alpha: 0.14),
-        backgroundImage: (avatarUrl != null && avatarUrl!.isNotEmpty)
-            ? NetworkImage(avatarUrl!)
-            : null,
-        child: (avatarUrl == null || avatarUrl!.isEmpty)
-            ? Text(
-                initial,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              )
-            : null,
-      ),
-    );
-  }
-}
-
-class _PersonalLeaderboardCard extends StatelessWidget {
-  final User user;
-  final Stats stats;
-  final List<RecentQuiz> recentQuizzes;
-  final VoidCallback onViewAll;
-
-  const _PersonalLeaderboardCard({
+class _RecentActivityCard extends StatelessWidget {
+  const _RecentActivityCard({
     required this.user,
     required this.stats,
     required this.recentQuizzes,
     required this.onViewAll,
   });
 
+  final User user;
+  final Stats stats;
+  final List<RecentQuiz> recentQuizzes;
+  final VoidCallback onViewAll;
+
   @override
   Widget build(BuildContext context) {
     final rows = recentQuizzes.take(5).toList();
-    final isTabletUp = _Responsive.isTabletUp(context);
-
-    final subtitle = (user.school != null && user.school!.isNotEmpty)
-        ? user.school!
-        : (user.grade?.name ??
-              (user.district ??
-                  (user.isGovernmentExamCandidate || user.grade == null
-                      ? 'Government Exam Candidate'
-                      : 'QuizLanka AI learner')));
+    final hasImage = user.avatarUrl != null && user.avatarUrl!.isNotEmpty;
 
     return Container(
-      decoration: _Palette.card(radius: 22),
-      padding: EdgeInsets.all(isTabletUp ? 20 : 16),
+      decoration: _D.card(radius: 22),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
               CircleAvatar(
-                radius: _Responsive.avatarRadius(context, 18),
-                backgroundColor: _Palette.violet.withValues(alpha: 0.12),
-                backgroundImage:
-                    (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
+                radius: 20,
+                backgroundColor: _D.tint,
+                backgroundImage: hasImage
                     ? NetworkImage(user.avatarUrl!)
                     : null,
-                child: (user.avatarUrl == null || user.avatarUrl!.isEmpty)
-                    ? Text(
+                child: hasImage
+                    ? null
+                    : Text(
                         user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
                         style: const TextStyle(
-                          color: _Palette.violet,
-                          fontWeight: FontWeight.w700,
+                          color: QL.blue,
+                          fontWeight: FontWeight.w800,
                         ),
-                      )
-                    : null,
+                      ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       user.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13.5,
-                        color: _Palette.textPrimary,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14.5,
+                        color: QL.ink,
                       ),
                     ),
                     Text(
-                      subtitle,
+                      user.subtitleLabel,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: _Palette.textSecondary,
-                      ),
+                      style: const TextStyle(fontSize: 12, color: QL.muted),
                     ),
                   ],
                 ),
@@ -2311,35 +1685,32 @@ class _PersonalLeaderboardCard extends StatelessWidget {
                   vertical: 5,
                 ),
                 decoration: BoxDecoration(
-                  color: _Palette.gold.withValues(alpha: 0.12),
+                  color: QL.gold.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
                   '${stats.xpPoints ?? 0} XP',
                   style: const TextStyle(
-                    color: _Palette.gold,
-                    fontSize: 11.5,
+                    color: QL.ink,
+                    fontSize: 12,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
             ],
           ),
-          const Divider(height: 22, color: _Palette.border),
+          const Divider(height: 24, color: Color(0xFFE3E9F5)),
           if (rows.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 12),
               child: Text(
-                'No quiz history yet',
-                style: TextStyle(color: _Palette.textSecondary, fontSize: 13),
+                'No quiz history yet. Take your first quiz to see it here.',
+                style: TextStyle(color: QL.muted, fontSize: 13),
               ),
             )
           else
-            ...List.generate(
-              rows.length,
-              (i) => _RecentQuizRow(rank: i + 1, quiz: rows[i]),
-            ),
-          const SizedBox(height: 6),
+            for (var i = 0; i < rows.length; i++)
+              _RecentQuizRow(rank: i + 1, quiz: rows[i]),
           Align(
             alignment: Alignment.centerRight,
             child: _ViewAllButton(onTap: onViewAll),
@@ -2351,17 +1722,17 @@ class _PersonalLeaderboardCard extends StatelessWidget {
 }
 
 class _RecentQuizRow extends StatelessWidget {
+  const _RecentQuizRow({required this.rank, required this.quiz});
+
   final int rank;
   final RecentQuiz quiz;
-
-  const _RecentQuizRow({required this.rank, required this.quiz});
 
   @override
   Widget build(BuildContext context) {
     final color = quiz.subject.flutterColor;
-    final percentage = quiz.percentage;
-    final isGood = percentage >= 50;
-    final badgeColor = isGood ? _Palette.success : _Palette.danger;
+    final pct = quiz.percentage;
+    final good = pct >= 50;
+    final badge = good ? _D.success : QL.danger;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7),
@@ -2372,26 +1743,26 @@ class _RecentQuizRow extends StatelessWidget {
             child: Text(
               '$rank',
               style: const TextStyle(
-                fontSize: 12,
+                fontSize: 12.5,
                 fontWeight: FontWeight.w800,
-                color: _Palette.textSecondary,
+                color: QL.muted,
               ),
             ),
           ),
           SizedBox(
-            width: 36,
-            height: 36,
+            width: 38,
+            height: 38,
             child: Stack(
               alignment: Alignment.center,
               children: [
                 SizedBox(
-                  width: 36,
-                  height: 36,
+                  width: 38,
+                  height: 38,
                   child: CircularProgressIndicator(
-                    value: (percentage / 100).clamp(0.0, 1.0),
+                    value: (pct / 100).clamp(0.0, 1.0),
                     strokeWidth: 3,
-                    backgroundColor: color.withValues(alpha: 0.1),
-                    valueColor: AlwaysStoppedAnimation(badgeColor),
+                    backgroundColor: _D.tint,
+                    valueColor: AlwaysStoppedAnimation(badge),
                   ),
                 ),
                 Text(
@@ -2400,8 +1771,8 @@ class _RecentQuizRow extends StatelessWidget {
                       : '?',
                   style: TextStyle(
                     color: color,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
                   ),
                 ),
               ],
@@ -2414,34 +1785,33 @@ class _RecentQuizRow extends StatelessWidget {
               children: [
                 Text(
                   quiz.subject.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
-                    color: _Palette.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: QL.ink,
                   ),
                 ),
                 Text(
                   quiz.quizType,
-                  style: const TextStyle(
-                    fontSize: 10.5,
-                    color: _Palette.textSecondary,
-                  ),
+                  style: const TextStyle(fontSize: 11.5, color: QL.muted),
                 ),
               ],
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
-              color: badgeColor.withValues(alpha: 0.1),
+              color: badge.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              '${percentage.toStringAsFixed(0)}%',
+              '${pct.toStringAsFixed(0)}%',
               style: TextStyle(
-                color: badgeColor,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+                color: badge,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ),
@@ -2453,23 +1823,24 @@ class _RecentQuizRow extends StatelessWidget {
 
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle(this.label);
+
   final String label;
 
   @override
-  Widget build(BuildContext context) {
-    return Text(
-      label,
-      style: TextStyle(
-        fontSize: _Responsive.scale(context, 16),
-        fontWeight: FontWeight.w800,
-        color: _Palette.textPrimary,
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Text(
+    label,
+    style: const TextStyle(
+      fontSize: 17,
+      fontWeight: FontWeight.w800,
+      color: QL.ink,
+      letterSpacing: -0.2,
+    ),
+  );
 }
 
 class _ViewAllButton extends StatelessWidget {
   const _ViewAllButton({required this.onTap});
+
   final VoidCallback onTap;
 
   @override
@@ -2477,17 +1848,13 @@ class _ViewAllButton extends StatelessWidget {
     return TextButton(
       onPressed: onTap,
       style: TextButton.styleFrom(
-        padding: EdgeInsets.zero,
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        foregroundColor: QL.blue,
+        minimumSize: const Size(64, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
       ),
       child: const Text(
-        'View All',
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          color: _Palette.violet,
-        ),
+        'View all',
+        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
       ),
     );
   }

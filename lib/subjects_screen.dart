@@ -1,26 +1,33 @@
 // subjects_screen.dart
 // ============================================================
-// PREMIUM SUBJECTS SCREEN — aligned with StudentSubjectController
+// SUBJECTS SCREEN — aligned with StudentSubjectController
 //
 // Backend contract (GET /api/subjects):
-//  200 { success:true,  grade:{id,name}, al_stream, subjects:[...] }
+//  200 { success:true,  grade_category:'gov', grade:null, subjects:[...] }
+//  200 { success:true,  grade:{id,name}, grade_category, al_stream, subjects:[...] }
 //  200 { success:true,  subjects:[], message:"Please select your grade first." }
 //  401 { success:false, message, subjects:[] }
 //  422 { success:false, message:"Please select a valid A/L stream." }
 //  500 { success:false, message:"Failed to load subjects." }
 //
-// Each subject: { id, name, slug, icon|null, color, questions_count, description }
+// Each subject: { id, name, slug, grade_category, icon|null, color,
+//                 questions_count, description }
 // ============================================================
 
 import 'dart:async';
-import 'dart:io';
 import 'dart:convert';
-import 'dart:ui';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:quiz_lanka/Login.dart' show TokenStorage, LoginScreen;
+import 'package:quiz_lanka/QL.dart';
 import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/difficulty_screen.dart';
-import 'package:quiz_lanka/Login.dart';
+
+const Color _pageBg = Color(0xFFF1F5FC);
+
+String _clean(Object e) => e.toString().replaceFirst('Exception: ', '');
 
 // ============================================================
 // 1. MODELS
@@ -30,6 +37,7 @@ class Subject {
   final int id;
   final String name;
   final String? slug;
+  final String? gradeCategory;
   final String? icon; // full network URL or null
   final String color;
   final int? questionsCount;
@@ -39,6 +47,7 @@ class Subject {
     required this.id,
     required this.name,
     this.slug,
+    this.gradeCategory,
     this.icon,
     required this.color,
     this.questionsCount,
@@ -50,8 +59,9 @@ class Subject {
       id: _asInt(json['id'], fallback: 0),
       name: (json['name'] as String?) ?? 'Unknown Subject',
       slug: _asNullableString(json['slug']),
+      gradeCategory: _asNullableString(json['grade_category']),
       icon: _asNullableString(json['icon']),
-      color: _asNullableString(json['color']) ?? '#4E3AE8',
+      color: _asNullableString(json['color']) ?? '#1E4FD8',
       questionsCount: json['questions_count'] == null
           ? null
           : _asInt(json['questions_count'], fallback: 0),
@@ -63,6 +73,7 @@ class Subject {
     'id': id,
     'name': name,
     'slug': slug,
+    'grade_category': gradeCategory,
     'icon': icon,
     'color': color,
     'questions_count': questionsCount,
@@ -93,11 +104,11 @@ class Subject {
       } else if (cleaned.length == 8) {
         return Color(int.parse(cleaned, radix: 16));
       } else {
-        return const Color(0xFF4E3AE8);
+        return const Color(0xFF1E4FD8);
       }
       return Color(int.parse('FF$hex', radix: 16));
     } catch (_) {
-      return const Color(0xFF4E3AE8);
+      return const Color(0xFF1E4FD8);
     }
   }
 }
@@ -107,6 +118,7 @@ class SubjectsResult {
   final int? gradeId;
   final String? gradeName;
   final String? alStream;
+  final String? gradeCategory;
   final String? message;
   final bool success;
 
@@ -115,11 +127,14 @@ class SubjectsResult {
     this.gradeId,
     this.gradeName,
     this.alStream,
+    this.gradeCategory,
     this.message,
     required this.success,
   });
 
   bool get hasGrade => gradeId != null;
+
+  bool get isGovernmentExam => gradeCategory == 'gov';
 }
 
 // ============================================================
@@ -133,7 +148,7 @@ class SubjectService {
     final token = await TokenStorage.getToken();
 
     if (token == null || token.isEmpty) {
-      throw Exception('Authentication token not found. Please login again.');
+      throw Exception('Session expired. Please login again.');
     }
 
     http.Response response;
@@ -149,13 +164,16 @@ class SubjectService {
       throw Exception('The request timed out. Please try again.');
     } on SocketException {
       throw Exception('No internet connection. Please check your network.');
-    } on HttpException {
+    } on http.ClientException {
       throw Exception('Could not reach the server. Please try again.');
-    } on FormatException {
-      throw Exception('Invalid server response. Please try again.');
     }
 
-    debugPrint('Subjects API ${response.statusCode}: ${response.body}');
+    debugPrint('Subjects API status: ${response.statusCode}');
+
+    if (response.statusCode == 401) {
+      await TokenStorage.clearAll();
+      throw Exception('Session expired. Please login again.');
+    }
 
     Map<String, dynamic> data;
     try {
@@ -191,20 +209,17 @@ class SubjectService {
       }
 
       final alStream = data['al_stream'] as String?;
+      final gradeCategory = data['grade_category'] as String?;
 
       return SubjectsResult(
         subjects: subjects,
         gradeId: gradeId,
         gradeName: gradeName,
         alStream: (alStream != null && alStream.isNotEmpty) ? alStream : null,
+        gradeCategory: gradeCategory,
         message: serverMessage,
         success: true,
       );
-    }
-
-    if (response.statusCode == 401) {
-      await TokenStorage.clearAll();
-      throw Exception(serverMessage ?? 'Session expired. Please login again.');
     }
 
     if (response.statusCode == 403) {
@@ -212,11 +227,9 @@ class SubjectService {
         serverMessage ?? 'You do not have access to these subjects.',
       );
     }
-
     if (response.statusCode == 422) {
       throw Exception(serverMessage ?? 'Please select a valid A/L stream.');
     }
-
     if (response.statusCode >= 500) {
       throw Exception(serverMessage ?? 'Server error. Please try again later.');
     }
@@ -230,58 +243,7 @@ class SubjectService {
 }
 
 // ============================================================
-// 3. DESIGN TOKENS
-// ============================================================
-
-class _Palette {
-  _Palette._();
-
-  static const Color violet = Color(0xFF6D28D9);
-  static const Color violetDeep = Color(0xFF4C1D95);
-  static const Color gold = Color(0xFFF5B942);
-  static const List<Color> ctaGradient = [Color(0xFF7C3AED), Color(0xFF2563EB)];
-  static const List<Color> heroGradient = [
-    Color(0xFF6D28D9),
-    Color(0xFF4338CA),
-    Color(0xFF2563EB),
-  ];
-
-  static const String backgroundAsset = 'assets/sub_bg.png';
-
-  static const List<Color> pageGradientFallback = [
-    Color(0xFFEDE9FE),
-    Color(0xFFF1EEFB),
-    Color(0xFFF9F9FD),
-  ];
-
-  static const Color cardWhite = Colors.white;
-  static const Color border = Color(0xFFECE9F6);
-  static const Color borderSoft = Color(0xFFF1EFFA);
-
-  static const Color textPrimary = Color(0xFF15142B);
-  static const Color textSecondary = Color(0xFF6E7188);
-  static const Color textMuted = Color(0xFF9A9CB0);
-
-  static const Color danger = Color(0xFFEF4444);
-
-  static BoxDecoration glass({double radius = 18}) {
-    return BoxDecoration(
-      color: Colors.white.withValues(alpha: 0.72),
-      borderRadius: BorderRadius.circular(radius),
-      border: Border.all(color: Colors.white.withValues(alpha: 0.9)),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x1A232B6B),
-          blurRadius: 20,
-          offset: Offset(0, 8),
-        ),
-      ],
-    );
-  }
-}
-
-// ============================================================
-// 4. SUBJECTS SCREEN
+// 3. SUBJECTS SCREEN
 // ============================================================
 
 class SubjectsScreen extends StatefulWidget {
@@ -292,39 +254,77 @@ class SubjectsScreen extends StatefulWidget {
 }
 
 class _SubjectsScreenState extends State<SubjectsScreen>
-    with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
+    with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
   final SubjectService _service = SubjectService();
-  late Future<SubjectsResult> _subjectsFuture;
-  late final AnimationController _entryController;
+  late final AnimationController _entry;
+
+  SubjectsResult? _result;
+  String? _error;
+  bool _loading = true;
 
   bool _searchOpen = false;
   String _query = '';
 
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   void initState() {
     super.initState();
-    _subjectsFuture = _service.getSubjects();
-    _entryController = AnimationController(
+    _entry = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 520),
-    )..forward();
+    );
+    _load();
   }
 
   @override
   void dispose() {
     _service.dispose();
-    _entryController.dispose();
+    _entry.dispose();
     super.dispose();
   }
 
-  void _refresh() {
-    setState(() {
-      _query = '';
-      _entryController
+  /// Loads subjects. Existing content stays visible while refreshing.
+  Future<void> _load() async {
+    if (_result == null) setState(() => _loading = true);
+
+    try {
+      final r = await _service.getSubjects();
+      if (!mounted) return;
+      setState(() {
+        _result = r;
+        _error = null;
+        _loading = false;
+      });
+      _entry
         ..reset()
         ..forward();
-      _subjectsFuture = _service.getSubjects();
-    });
+    } catch (e) {
+      if (!mounted) return;
+      if (_result == null) {
+        setState(() {
+          _error = _clean(e);
+          _loading = false;
+        });
+      } else {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: QL.danger,
+            content: Text(_clean(e)),
+          ),
+        );
+      }
+    }
+  }
+
+  void _goToLogin() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   void _openDifficultyScreen(Subject subject) {
@@ -333,478 +333,342 @@ class _SubjectsScreenState extends State<SubjectsScreen>
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 320),
         pageBuilder: (_, animation, __) => DifficultyScreen(subject: subject),
-        transitionsBuilder: (_, animation, __, child) {
-          return FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position:
-                  Tween<Offset>(
-                    begin: const Offset(0, 0.06),
-                    end: Offset.zero,
-                  ).animate(
-                    CurvedAnimation(
-                      parent: animation,
-                      curve: Curves.easeOutCubic,
-                    ),
+        transitionsBuilder: (_, animation, __, child) => FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position:
+                Tween<Offset>(
+                  begin: const Offset(0, 0.06),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
                   ),
-              child: child,
-            ),
-          );
-        },
+                ),
+            child: child,
+          ),
+        ),
       ),
     );
   }
 
   List<Subject> _applyFilter(List<Subject> subjects) {
-    if (_query.trim().isEmpty) return subjects;
     final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return subjects;
     return subjects.where((s) => s.name.toLowerCase().contains(q)).toList();
   }
-
-  @override
-  bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9FD),
-      body: Stack(
+      backgroundColor: _pageBg,
+      body: Column(
         children: [
-          Positioned.fill(
-            child: Image.asset(
-              _Palette.backgroundAsset,
-              fit: BoxFit.cover,
-              alignment: Alignment.topCenter,
-              errorBuilder: (context, error, stack) => const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: _Palette.pageGradientFallback,
-                  ),
+          _buildHeader(),
+          Expanded(child: _buildContent()),
+        ],
+      ),
+    );
+  }
+
+  // ── Header ──────────────────────────────────────────────────
+  Widget _buildHeader() {
+    final canPop = Navigator.canPop(context);
+    final gradeName = _result?.gradeName;
+    final stream = _result?.alStream;
+
+    String subtitle = 'Select a subject to start learning';
+
+    if (_result?.isGovernmentExam == true) {
+      subtitle = 'Government Exams';
+    } else if (gradeName != null && gradeName.isNotEmpty) {
+      subtitle = stream != null ? '$gradeName · $stream' : gradeName;
+    }
+
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
+      child: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [QL.navy, QL.navyDeep],
+          ),
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              top: -60,
+              right: -40,
+              child: Container(
+                width: 170,
+                height: 170,
+                decoration: const BoxDecoration(
+                  color: QL.navyLight,
+                  shape: BoxShape.circle,
                 ),
               ),
             ),
-          ),
-          SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                _TopBar(
-                  onBack: () {
-                    if (Navigator.canPop(context)) {
-                      Navigator.pop(context);
-                    }
-                  },
-                  searchOpen: _searchOpen,
-                  onToggleSearch: () {
-                    setState(() {
-                      _searchOpen = !_searchOpen;
-                      if (!_searchOpen) _query = '';
-                    });
-                  },
-                ),
-                AnimatedCrossFade(
-                  duration: const Duration(milliseconds: 240),
-                  crossFadeState: _searchOpen
-                      ? CrossFadeState.showFirst
-                      : CrossFadeState.showSecond,
-                  firstChild: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
-                    child: _SearchField(
-                      onChanged: (v) => setState(() => _query = v),
-                    ),
-                  ),
-                  secondChild: const SizedBox(width: double.infinity),
-                ),
-                Expanded(
-                  child: FutureBuilder<SubjectsResult>(
-                    future: _subjectsFuture,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const _LoadingView();
-                      }
-
-                      if (snapshot.hasError) {
-                        return _ErrorView(
-                          message: snapshot.error.toString(),
-                          onRetry: _refresh,
-                        );
-                      }
-
-                      final result = snapshot.data;
-                      final allSubjects = result?.subjects ?? const <Subject>[];
-                      final subjects = _applyFilter(allSubjects);
-
-                      final totalQuizzes = allSubjects.fold<int>(
-                        0,
-                        (sum, s) => sum + (s.questionsCount ?? 0),
-                      );
-
-                      return RefreshIndicator(
-                        onRefresh: () async => _refresh(),
-                        color: _Palette.violet,
-                        child: CustomScrollView(
-                          physics: const AlwaysScrollableScrollPhysics(
-                            parent: BouncingScrollPhysics(),
+            SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        if (canPop) ...[
+                          _HeaderButton(
+                            icon: Icons.arrow_back_rounded,
+                            label: 'Back',
+                            onTap: () => Navigator.pop(context),
                           ),
-                          slivers: [
-                            if (allSubjects.isNotEmpty)
-                              SliverToBoxAdapter(
-                                child: _HeroStatsBanner(
-                                  subjectCount: allSubjects.length,
-                                  totalQuizzes: totalQuizzes,
+                          const SizedBox(width: 12),
+                        ] else
+                          const SizedBox(width: 6),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Choose subjects',
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                  letterSpacing: -0.4,
                                 ),
                               ),
-                            if (allSubjects.isEmpty)
-                              SliverFillRemaining(
-                                hasScrollBody: false,
-                                child: _EmptyView(
-                                  message: result?.message,
-                                  hasGrade: result?.hasGrade ?? false,
-                                  gradeName: result?.gradeName,
-                                ),
-                              )
-                            else if (subjects.isEmpty)
-                              SliverFillRemaining(
-                                hasScrollBody: false,
-                                child: _NoResultsView(query: _query),
-                              )
-                            else ...[
-                              SliverPadding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  20,
-                                  8,
-                                  20,
-                                  6,
-                                ),
-                                sliver: SliverToBoxAdapter(
-                                  child: _SectionLabel(count: subjects.length),
-                                ),
-                              ),
-                              // ═══════════════════════════════════════
-                              // WIDE + SHORT TILES
-                              //   crossAxisCount: 1  → full-width cards
-                              //   childAspectRatio: 4.2 → wide & short
-                              // ═══════════════════════════════════════
-                              SliverPadding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  20,
-                                  4,
-                                  20,
-                                  28,
-                                ),
-                                sliver: SliverGrid(
-                                  gridDelegate:
-                                      const SliverGridDelegateWithFixedCrossAxisCount(
-                                        crossAxisCount: 1,
-                                        crossAxisSpacing: 14,
-                                        mainAxisSpacing: 12,
-                                        childAspectRatio: 4.2,
-                                      ),
-                                  delegate: SliverChildBuilderDelegate((
-                                    context,
-                                    index,
-                                  ) {
-                                    final subject = subjects[index];
-                                    return _SubjectTile(
-                                      subject: subject,
-                                      index: index,
-                                      controller: _entryController,
-                                      onTap: () =>
-                                          _openDifficultyScreen(subject),
-                                    );
-                                  }, childCount: subjects.length),
+                              const SizedBox(height: 2),
+                              Text(
+                                subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: QL.ice,
+                                  fontSize: 13,
                                 ),
                               ),
                             ],
-                            const SliverToBoxAdapter(child: _FooterNote()),
-                          ],
+                          ),
                         ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ============================================================
-// 5. WIDGETS
-// ============================================================
-
-class _TopBar extends StatelessWidget {
-  const _TopBar({
-    required this.onBack,
-    required this.searchOpen,
-    required this.onToggleSearch,
-  });
-
-  final VoidCallback onBack;
-  final bool searchOpen;
-  final VoidCallback onToggleSearch;
-
-  @override
-  Widget build(BuildContext context) {
-    final canPop = Navigator.canPop(context);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
-      child: Row(
-        children: [
-          _CircleIconButton(
-            icon: canPop
-                ? Icons.arrow_back_ios_new_rounded
-                : Icons.home_rounded,
-            onTap: onBack,
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ShaderMask(
-                  shaderCallback: (bounds) => const LinearGradient(
-                    colors: _Palette.ctaGradient,
-                  ).createShader(bounds),
-                  child: const Text(
-                    'Choose Subjects',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                      letterSpacing: -0.4,
-                      height: 1.1,
+                        _HeaderButton(
+                          icon: _searchOpen
+                              ? Icons.close_rounded
+                              : Icons.search_rounded,
+                          label: _searchOpen ? 'Close search' : 'Search',
+                          active: _searchOpen,
+                          onTap: () => setState(() {
+                            _searchOpen = !_searchOpen;
+                            if (!_searchOpen) _query = '';
+                          }),
+                        ),
+                      ],
                     ),
-                  ),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOut,
+                      alignment: Alignment.topCenter,
+                      child: _searchOpen
+                          ? Padding(
+                              padding: const EdgeInsets.only(top: 14),
+                              child: TextField(
+                                autofocus: true,
+                                onChanged: (v) => setState(() => _query = v),
+                                style: qlInputStyle,
+                                cursorColor: QL.blue,
+                                decoration: qlFieldDecoration(
+                                  hint: 'Search subjects',
+                                  icon: Icons.search_rounded,
+                                ),
+                              ),
+                            )
+                          : const SizedBox(width: double.infinity),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 3),
-                const Text(
-                  'Select a subject to start learning',
-                  style: TextStyle(
-                    color: _Palette.textSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          _CircleIconButton(
-            icon: searchOpen ? Icons.close_rounded : Icons.search_rounded,
-            onTap: onToggleSearch,
-            active: searchOpen,
-          ),
-          const SizedBox(width: 10),
-          _CircleIconButton(
-            icon: Icons.notifications_none_rounded,
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  behavior: SnackBarBehavior.floating,
-                  backgroundColor: _Palette.textPrimary,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  content: const Text('Notifications are coming soon'),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            },
-          ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Body ────────────────────────────────────────────────────
+  Widget _buildContent() {
+    if (_loading && _result == null) {
+      return const Center(
+        child: CircularProgressIndicator(color: QL.blue, strokeWidth: 2.5),
+      );
+    }
+
+    final result = _result;
+    if (result == null) {
+      final msg = _error ?? 'Something went wrong.';
+      return _ErrorView(
+        message: msg,
+        sessionExpired: msg.toLowerCase().contains('session expired'),
+        onRetry: _load,
+        onLogin: _goToLogin,
+      );
+    }
+
+    final all = result.subjects;
+    final subjects = _applyFilter(all);
+    final totalQuestions = all.fold<int>(
+      0,
+      (sum, s) => sum + (s.questionsCount ?? 0),
+    );
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      color: QL.blue,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        slivers: [
+          if (all.isNotEmpty)
+            SliverToBoxAdapter(
+              child: _StatsBanner(
+                subjectCount: all.length,
+                totalQuestions: totalQuestions,
+              ),
+            ),
+          if (all.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _EmptyView(
+                message: result.message,
+                hasGrade: result.hasGrade,
+                gradeName: result.gradeName,
+                isGovernmentExam: result.isGovernmentExam,
+              ),
+            )
+          else if (subjects.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _NoResultsView(query: _query),
+            )
+          else ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
+                child: _SectionLabel(count: subjects.length),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final subject = subjects[index];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _SubjectTile(
+                      subject: subject,
+                      index: index,
+                      controller: _entry,
+                      onTap: () => _openDifficultyScreen(subject),
+                    ),
+                  );
+                }, childCount: subjects.length),
+              ),
+            ),
+          ],
+          const SliverToBoxAdapter(child: _FooterNote()),
         ],
       ),
     );
   }
 }
 
-class _CircleIconButton extends StatelessWidget {
-  const _CircleIconButton({
+// ============================================================
+// 4. WIDGETS
+// ============================================================
+
+class _HeaderButton extends StatelessWidget {
+  const _HeaderButton({
     required this.icon,
+    required this.label,
     required this.onTap,
     this.active = false,
   });
 
   final IconData icon;
+  final String label;
   final VoidCallback onTap;
   final bool active;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: GestureDetector(
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              gradient: active
-                  ? const LinearGradient(colors: _Palette.ctaGradient)
-                  : null,
-              color: active ? null : Colors.white.withValues(alpha: 0.78),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: active
-                    ? Colors.transparent
-                    : Colors.white.withValues(alpha: 0.9),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: active
-                      ? _Palette.violet.withValues(alpha: 0.35)
-                      : const Color(0x14232B6B),
-                  blurRadius: active ? 16 : 12,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-            ),
-            child: Icon(
-              icon,
-              color: active ? Colors.white : _Palette.textPrimary,
-              size: 18,
-            ),
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: active ? QL.gold : QL.navyDeep,
+            shape: BoxShape.circle,
           ),
+          child: Icon(icon, color: active ? QL.navy : Colors.white, size: 22),
         ),
       ),
     );
   }
 }
 
-class _SearchField extends StatelessWidget {
-  const _SearchField({required this.onChanged});
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: _Palette.glass(radius: 16),
-      child: TextField(
-        autofocus: true,
-        onChanged: onChanged,
-        style: const TextStyle(
-          color: _Palette.textPrimary,
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-        ),
-        decoration: const InputDecoration(
-          hintText: 'Search subjects…',
-          hintStyle: TextStyle(color: _Palette.textMuted),
-          prefixIcon: Icon(
-            Icons.search_rounded,
-            color: _Palette.violet,
-            size: 20,
-          ),
-          border: InputBorder.none,
-          contentPadding: EdgeInsets.symmetric(vertical: 14),
-        ),
-      ),
-    );
-  }
-}
-
-class _HeroStatsBanner extends StatelessWidget {
-  const _HeroStatsBanner({
+class _StatsBanner extends StatelessWidget {
+  const _StatsBanner({
     required this.subjectCount,
-    required this.totalQuizzes,
+    required this.totalQuestions,
   });
 
   final int subjectCount;
-  final int totalQuizzes;
+  final int totalQuestions;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: _Palette.heroGradient,
-          ),
-          borderRadius: BorderRadius.circular(26),
-          boxShadow: [
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: const Color(0xFFDCE4F4)),
+          boxShadow: const [
             BoxShadow(
-              color: _Palette.violetDeep.withValues(alpha: 0.32),
-              blurRadius: 26,
-              offset: const Offset(0, 14),
+              color: Color(0x14123066),
+              blurRadius: 14,
+              offset: Offset(0, 6),
             ),
           ],
         ),
-        child: Stack(
+        child: Row(
           children: [
-            Positioned(
-              right: -18,
-              top: -22,
-              child: Icon(
-                Icons.auto_awesome_rounded,
-                size: 96,
-                color: Colors.white.withValues(alpha: 0.08),
+            Expanded(
+              child: _BannerStat(
+                icon: Icons.menu_book_rounded,
+                value: '$subjectCount',
+                label: 'Subjects',
               ),
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(7),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.16),
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: const Icon(
-                        Icons.workspace_premium_rounded,
-                        color: _Palette.gold,
-                        size: 15,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Your Learning Overview',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.1,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _HeroStat(
-                        value: '$subjectCount',
-                        label: 'Total Subjects',
-                        icon: Icons.menu_book_rounded,
-                      ),
-                    ),
-                    const _HeroDivider(),
-                    Expanded(
-                      child: _HeroStat(
-                        value: '$totalQuizzes',
-                        label: 'Total Quizzes',
-                        icon: Icons.quiz_rounded,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+            Container(width: 1, height: 44, color: const Color(0xFFE3E9F5)),
+            Expanded(
+              child: _BannerStat(
+                icon: Icons.quiz_rounded,
+                value: '$totalQuestions',
+                label: 'Questions',
+              ),
             ),
           ],
         ),
@@ -813,56 +677,46 @@ class _HeroStatsBanner extends StatelessWidget {
   }
 }
 
-class _HeroDivider extends StatelessWidget {
-  const _HeroDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 40,
-      color: Colors.white.withValues(alpha: 0.18),
-      margin: const EdgeInsets.symmetric(horizontal: 6),
-    );
-  }
-}
-
-class _HeroStat extends StatelessWidget {
-  const _HeroStat({
+class _BannerStat extends StatelessWidget {
+  const _BannerStat({
+    required this.icon,
     required this.value,
     required this.label,
-    required this.icon,
   });
 
+  final IconData icon;
   final String value;
   final String label;
-  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(icon, color: Colors.white.withValues(alpha: 0.85), size: 17),
-        const SizedBox(height: 6),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-            letterSpacing: -0.3,
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: QL.navy,
+            borderRadius: BorderRadius.circular(14),
           ),
+          child: Icon(icon, color: QL.gold, size: 22),
         ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w500,
-            color: Colors.white.withValues(alpha: 0.78),
-          ),
+        const SizedBox(width: 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: QL.ink,
+                letterSpacing: -0.3,
+              ),
+            ),
+            Text(label, style: const TextStyle(fontSize: 12, color: QL.muted)),
+          ],
         ),
       ],
     );
@@ -878,27 +732,27 @@ class _SectionLabel extends StatelessWidget {
     return Row(
       children: [
         const Text(
-          'All Subjects',
+          'All subjects',
           style: TextStyle(
-            fontSize: 15,
+            fontSize: 17,
             fontWeight: FontWeight.w800,
-            color: _Palette.textPrimary,
+            color: QL.ink,
             letterSpacing: -0.2,
           ),
         ),
         const SizedBox(width: 8),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
           decoration: BoxDecoration(
-            color: _Palette.violet.withValues(alpha: 0.1),
+            color: const Color(0xFFEAF0FF),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
             '$count',
             style: const TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w700,
-              color: _Palette.violet,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              color: QL.blue,
             ),
           ),
         ),
@@ -907,131 +761,67 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-class _LoadingView extends StatelessWidget {
-  const _LoadingView();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: _Palette.ctaGradient),
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: [
-                BoxShadow(
-                  color: _Palette.violet.withValues(alpha: 0.3),
-                  blurRadius: 18,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: const CircularProgressIndicator(
-              color: Colors.white,
-              strokeWidth: 2.5,
-            ),
-          ),
-          const SizedBox(height: 18),
-          const Text(
-            'Loading subjects…',
-            style: TextStyle(
-              color: _Palette.textSecondary,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ErrorView extends StatelessWidget {
-  final String message;
-  final VoidCallback onRetry;
+  const _ErrorView({
+    required this.message,
+    required this.sessionExpired,
+    required this.onRetry,
+    required this.onLogin,
+  });
 
-  const _ErrorView({required this.message, required this.onRetry});
+  final String message;
+  final bool sessionExpired;
+  final VoidCallback onRetry;
+  final VoidCallback onLogin;
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32.0),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 76,
-              height: 76,
-              decoration: BoxDecoration(
-                color: _Palette.danger.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(22),
+              width: 72,
+              height: 72,
+              decoration: const BoxDecoration(
+                color: QL.dangerBg,
+                shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.error_outline_rounded,
-                size: 36,
-                color: _Palette.danger,
+              child: Icon(
+                sessionExpired
+                    ? Icons.lock_outline_rounded
+                    : Icons.cloud_off_rounded,
+                size: 34,
+                color: QL.danger,
               ),
             ),
             const SizedBox(height: 20),
-            const Text(
-              'Unable to load subjects',
-              style: TextStyle(
-                color: _Palette.textPrimary,
-                fontSize: 18,
+            Text(
+              sessionExpired ? 'Session expired' : 'Unable to load subjects',
+              style: const TextStyle(
+                color: QL.ink,
+                fontSize: 19,
                 fontWeight: FontWeight.w800,
-                letterSpacing: -0.2,
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              message.replaceFirst('Exception: ', ''),
+              message,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color: _Palette.textSecondary,
+                color: QL.muted,
                 fontSize: 14,
                 height: 1.5,
               ),
             ),
-            const SizedBox(height: 26),
-            GestureDetector(
-              onTap: onRetry,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 30,
-                  vertical: 15,
-                ),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: _Palette.ctaGradient),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: _Palette.violet.withValues(alpha: 0.35),
-                      blurRadius: 16,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.refresh_rounded, size: 18, color: Colors.white),
-                    SizedBox(width: 8),
-                    Text(
-                      'Retry',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14.5,
-                      ),
-                    ),
-                  ],
-                ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: 200,
+              child: QLPrimaryButton(
+                label: sessionExpired ? 'Log in' : 'Retry',
+                onTap: sessionExpired ? onLogin : onRetry,
               ),
             ),
           ],
@@ -1042,20 +832,33 @@ class _ErrorView extends StatelessWidget {
 }
 
 class _EmptyView extends StatelessWidget {
-  const _EmptyView({this.message, this.hasGrade = false, this.gradeName});
+  const _EmptyView({
+    this.message,
+    this.hasGrade = false,
+    this.gradeName,
+    this.isGovernmentExam = false,
+  });
 
   final String? message;
   final bool hasGrade;
   final String? gradeName;
+  final bool isGovernmentExam;
 
   @override
   Widget build(BuildContext context) {
-    final bool noGrade = !hasGrade && (message != null && message!.isNotEmpty);
+    final bool noGrade =
+        !hasGrade &&
+        !isGovernmentExam &&
+        (message != null && message!.isNotEmpty);
+
     final String title = noGrade
         ? 'Set up your grade'
         : 'No subjects available';
+
     final String subtitle = noGrade
         ? (message ?? 'Please select your grade first.')
+        : isGovernmentExam
+        ? (message ?? 'Government examination subjects will appear here.')
         : (gradeName != null
               ? 'No active subjects for $gradeName yet.'
               : 'Subjects for your grade will appear here.');
@@ -1070,14 +873,13 @@ class _EmptyView extends StatelessWidget {
               width: 84,
               height: 84,
               decoration: BoxDecoration(
-                color: _Palette.violet.withValues(alpha: 0.08),
+                color: QL.navy,
                 borderRadius: BorderRadius.circular(26),
-                border: Border.all(color: _Palette.border),
               ),
               child: Icon(
                 noGrade ? Icons.school_outlined : Icons.menu_book_outlined,
                 size: 40,
-                color: _Palette.violet,
+                color: QL.gold,
               ),
             ),
             const SizedBox(height: 18),
@@ -1085,8 +887,8 @@ class _EmptyView extends StatelessWidget {
               title,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color: _Palette.textPrimary,
-                fontSize: 16,
+                color: QL.ink,
+                fontSize: 17,
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -1095,7 +897,7 @@ class _EmptyView extends StatelessWidget {
               subtitle,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color: _Palette.textSecondary,
+                color: QL.muted,
                 fontSize: 14,
                 height: 1.45,
               ),
@@ -1114,34 +916,36 @@ class _NoResultsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 84,
-            height: 84,
-            decoration: BoxDecoration(
-              color: _Palette.textSecondary.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(26),
-              border: Border.all(color: _Palette.border),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 84,
+              height: 84,
+              decoration: BoxDecoration(
+                color: const Color(0xFFEAF0FF),
+                borderRadius: BorderRadius.circular(26),
+              ),
+              child: const Icon(
+                Icons.search_off_rounded,
+                size: 38,
+                color: QL.blue,
+              ),
             ),
-            child: const Icon(
-              Icons.search_off_rounded,
-              size: 38,
-              color: _Palette.textSecondary,
+            const SizedBox(height: 18),
+            Text(
+              'No subjects match "$query"',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: QL.ink,
+                fontSize: 15.5,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ),
-          const SizedBox(height: 18),
-          Text(
-            'No subjects match "$query"',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: _Palette.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1152,37 +956,26 @@ class _FooterNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 22),
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.6),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _Palette.borderSoft),
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(20, 4, 20, 28),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.info_outline_rounded, size: 14, color: QL.muted),
+          SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              'You can change subjects anytime from settings',
+              style: TextStyle(fontSize: 12, color: QL.muted),
+            ),
           ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.shield_outlined,
-                size: 13,
-                color: _Palette.textSecondary,
-              ),
-              SizedBox(width: 6),
-              Text(
-                'You can change subjects anytime from settings',
-                style: TextStyle(fontSize: 11.5, color: _Palette.textSecondary),
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }
 }
 
+/// Public: also used by other screens (e.g. DifficultyScreen).
 class SubjectIcon extends StatelessWidget {
   final Subject subject;
   final Color color;
@@ -1202,8 +995,11 @@ class SubjectIcon extends StatelessWidget {
     if (name.contains('math')) return Icons.calculate_outlined;
     if (name.contains('science')) return Icons.science_outlined;
     if (name.contains('english')) return Icons.menu_book_outlined;
-    if (name.contains('sinhala')) return Icons.translate_rounded;
-    if (name.contains('tamil')) return Icons.translate_rounded;
+    if (name.contains('sinhala') ||
+        name.contains('tamil') ||
+        name.contains('language')) {
+      return Icons.translate_rounded;
+    }
     if (name.contains('ict') || name.contains('comput')) {
       return Icons.computer_outlined;
     }
@@ -1217,7 +1013,9 @@ class SubjectIcon extends StatelessWidget {
     if (name.contains('qa') || name.contains('aptitude')) {
       return Icons.psychology_outlined;
     }
-    if (name.contains('language')) return Icons.translate_rounded;
+    if (name.contains('general knowledge') || name.contains('current')) {
+      return Icons.public_rounded;
+    }
     return Icons.school_outlined;
   }
 
@@ -1231,21 +1029,10 @@ class SubjectIcon extends StatelessWidget {
       height: size,
       padding: EdgeInsets.all(hasIcon ? size * 0.15 : 0),
       decoration: BoxDecoration(
-        gradient: onTintedBg
-            ? null
-            : LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  color.withValues(alpha: 0.16),
-                  color.withValues(alpha: 0.06),
-                ],
-              ),
-        color: onTintedBg ? Colors.white.withValues(alpha: 0.24) : null,
+        color: onTintedBg
+            ? Colors.white.withValues(alpha: 0.24)
+            : color.withValues(alpha: 0.13),
         borderRadius: BorderRadius.circular(size * 0.32),
-        border: onTintedBg
-            ? null
-            : Border.all(color: color.withValues(alpha: 0.22), width: 1),
       ),
       child: hasIcon
           ? ClipRRect(
@@ -1253,11 +1040,9 @@ class SubjectIcon extends StatelessWidget {
               child: Image.network(
                 subject.icon!,
                 fit: BoxFit.contain,
-                headers: const {"Accept": "image/*"},
+                headers: const {'Accept': 'image/*'},
                 frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                  if (wasSynchronouslyLoaded || frame != null) {
-                    return child;
-                  }
+                  if (wasSynchronouslyLoaded || frame != null) return child;
                   return Center(
                     child: SizedBox(
                       width: size * 0.3,
@@ -1270,8 +1055,7 @@ class SubjectIcon extends StatelessWidget {
                   );
                 },
                 errorBuilder: (context, error, stackTrace) {
-                  debugPrint("❌ Subject icon failed: $error");
-                  debugPrint("❌ URL: ${subject.icon}");
+                  debugPrint('Subject icon failed: ${subject.icon}');
                   return Icon(
                     _fallbackIcon(),
                     color: iconColor,
@@ -1285,9 +1069,6 @@ class SubjectIcon extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-// _SubjectTile — HORIZONTAL LAYOUT (wide + short)
-// ═══════════════════════════════════════════════════════════
 class _SubjectTile extends StatefulWidget {
   final Subject subject;
   final int index;
@@ -1323,104 +1104,96 @@ class _SubjectTileState extends State<_SubjectTile> {
 
     return AnimatedBuilder(
       animation: animation,
-      builder: (context, child) {
-        return Opacity(
-          opacity: animation.value,
-          child: Transform.translate(
-            offset: Offset(0, (1 - animation.value) * 18),
-            child: child,
-          ),
-        );
-      },
-      child: GestureDetector(
-        onTap: widget.onTap,
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapCancel: () => setState(() => _pressed = false),
-        onTapUp: (_) => setState(() => _pressed = false),
-        child: AnimatedScale(
-          scale: _pressed ? 0.98 : 1.0,
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
-          child: Container(
-            // Compact padding for the short horizontal layout
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-            decoration: BoxDecoration(
-              color: _Palette.cardWhite,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: color.withValues(alpha: 0.16)),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.14),
-                  blurRadius: 16,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                // ─── Icon (left)
-                SubjectIcon(subject: subject, color: color, size: 50),
-                const SizedBox(width: 14),
-
-                // ─── Name + quiz count (middle, expands)
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        subject.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _Palette.textPrimary,
-                          fontSize: 15.5,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          Icon(Icons.quiz_rounded, size: 12, color: color),
-                          const SizedBox(width: 5),
-                          Text(
-                            '$questionCount Quizzes',
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                              color: color,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+      builder: (context, child) => Opacity(
+        opacity: animation.value,
+        child: Transform.translate(
+          offset: Offset(0, (1 - animation.value) * 18),
+          child: child,
+        ),
+      ),
+      child: Semantics(
+        button: true,
+        label: '${subject.name}, $questionCount questions',
+        child: GestureDetector(
+          onTap: widget.onTap,
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapCancel: () => setState(() => _pressed = false),
+          onTapUp: (_) => setState(() => _pressed = false),
+          child: AnimatedScale(
+            scale: _pressed ? 0.98 : 1.0,
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOut,
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFFDCE4F4)),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x12123066),
+                    blurRadius: 14,
+                    offset: Offset(0, 6),
                   ),
-                ),
-
-                // ─── Arrow (right)
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        color.withValues(alpha: 0.14),
-                        color.withValues(alpha: 0.06),
+                ],
+              ),
+              child: Row(
+                children: [
+                  SubjectIcon(subject: subject, color: color, size: 52),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          subject.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: QL.ink,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.quiz_rounded,
+                              size: 14,
+                              color: QL.muted,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              '$questionCount questions',
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: QL.muted,
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: color.withValues(alpha: 0.22)),
                   ),
-                  child: Icon(
-                    Icons.arrow_forward_rounded,
-                    size: 15,
-                    color: color,
+                  const SizedBox(width: 8),
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFEAF0FF),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.arrow_forward_rounded,
+                      size: 18,
+                      color: QL.blue,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

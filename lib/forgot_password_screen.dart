@@ -1,57 +1,27 @@
 // lib/forgot_password_screen.dart
 // QuizLanka AI — Forgot Password (Step 1: Request OTP)
-// Light "Aurora" theme with soft blue shadows.
-// Self-contained: palette + service + UI in one file.
 //
-// BACKEND ROUTES:
-//   POST /forgot-password   body: { "email": "..." }
-//   success response:  { "success": true, "message": "OTP sent to your email", "email": "..." }
-//   error response:    { "success": false, "message": "..." }
-//   OR Laravel validation: { "errors": { "email": ["..."] } } (422)
+// BACKEND ROUTE:
+//   POST /student/forgot-password   body: { "email": "..." }
+//   success: { "success": true, "message": "OTP sent to your email", "email": "..." }
+//   error:   { "success": false, "message": "..." }
+//   or Laravel validation (422): { "errors": { "email": ["..."] } }
 
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:quiz_lanka/QL.dart';
 import 'package:quiz_lanka/config/api_config.dart';
 import 'package:quiz_lanka/verify_otp_screen.dart';
 
-// ─────────────────────────────────────────────
-// LIGHT THEME PALETTE (local to this screen)
-// ─────────────────────────────────────────────
-class _LightTheme {
-  static const List<Color> backgroundGradient = [
-    Color(0xFFFAFBFF),
-    Color(0xFFEAF0FF),
-  ];
-
-  static const Color primaryBlue = Color(0xFF3D5CFF);
-  static const Color accentCyan = Color(0xFF2FB6C9);
-  static const Color danger = Color(0xFFE05A5A);
-
-  static const Color textPrimary = Color(0xFF1B2440);
-  static const Color textSecondary = Color(0xFF6B7A99);
-
-  static const Color surface = Colors.white;
-  static const Color border = Color(0xFFDCE4FF);
-
-  static List<BoxShadow> blueShadow({
-    double blur = 24,
-    Offset offset = const Offset(0, 10),
-    double opacity = 0.16,
-  }) {
-    return [
-      BoxShadow(
-        color: primaryBlue.withValues(alpha: opacity),
-        blurRadius: blur,
-        offset: offset,
-      ),
-    ];
-  }
-
-}
+final RegExp _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 
 // ─────────────────────────────────────────────
-// SERVICE - Enhanced with better error handling
+// SERVICE
 // ─────────────────────────────────────────────
 class _ForgotPasswordService {
   Future<Map<String, dynamic>> sendOtp(String email) async {
@@ -61,35 +31,29 @@ class _ForgotPasswordService {
       final res = await http
           .post(
             uri,
-            headers: {
+            headers: const {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
-              // Add Authorization header if needed
-              // 'Authorization': 'Bearer ${ApiConfig.apiToken}',
             },
             body: jsonEncode({'email': email}),
           )
           .timeout(const Duration(seconds: 15));
 
-      final body = res.body.isNotEmpty
-          ? jsonDecode(res.body) as Map<String, dynamic>
-          : <String, dynamic>{};
+      Map<String, dynamic> body = <String, dynamic>{};
+      if (res.body.isNotEmpty) {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic>) body = decoded;
+      }
 
-      // Log for debugging (remove in production)
-      debugPrint(
-        'Forgot Password Response: Status ${res.statusCode}, Body: $body',
-      );
+      debugPrint('FORGOT PASSWORD STATUS: ${res.statusCode}');
 
-      // Handle success (200, 201)
       if (res.statusCode == 200 || res.statusCode == 201) {
-        // Check if the response has a success field (Laravel convention)
         if (body['success'] == false) {
           return {
             'ok': false,
             'message': body['message'] ?? 'Failed to send OTP',
           };
         }
-
         return {
           'ok': true,
           'message': body['message'] ?? 'OTP sent to your email',
@@ -97,41 +61,47 @@ class _ForgotPasswordService {
         };
       }
 
-      // Handle validation errors (422)
       if (res.statusCode == 422) {
-        // Laravel validation error format
-        if (body.containsKey('errors')) {
-          final errors = body['errors'] as Map<String, dynamic>?;
-          if (errors != null && errors.isNotEmpty) {
-            // Get first error message from any field
-            final firstError = errors.values.first;
-            if (firstError is List && firstError.isNotEmpty) {
-              return {'ok': false, 'message': firstError.first.toString()};
-            }
-            if (firstError is String) {
-              return {'ok': false, 'message': firstError};
-            }
+        final errors = body['errors'];
+        if (errors is Map && errors.isNotEmpty) {
+          final first = errors.values.first;
+          if (first is List && first.isNotEmpty) {
+            return {'ok': false, 'message': first.first.toString()};
           }
+          if (first is String) return {'ok': false, 'message': first};
         }
-
-        // Alternative error format
         return {
           'ok': false,
           'message': body['message'] ?? 'Please check the email you entered.',
         };
       }
 
-      // Handle other status codes
+      if (res.statusCode == 429) {
+        return {
+          'ok': false,
+          'message': 'Too many requests. Please wait a minute and try again.',
+        };
+      }
+
       return {
         'ok': false,
         'message':
             body['message'] ?? 'Something went wrong (${res.statusCode}).',
       };
+    } on TimeoutException {
+      return {
+        'ok': false,
+        'message': 'The server took too long to respond. Please try again.',
+      };
+    } on SocketException {
+      return {
+        'ok': false,
+        'message': 'No internet connection. Please check your network.',
+      };
     } on http.ClientException {
       return {
         'ok': false,
-        'message':
-            'Unable to connect to server. Please check your internet connection.',
+        'message': 'Unable to connect to the server. Please try again.',
       };
     } on FormatException {
       return {
@@ -139,10 +109,10 @@ class _ForgotPasswordService {
         'message': 'Invalid response from server. Please try again.',
       };
     } catch (e) {
-      debugPrint('Forgot Password Error: $e');
+      debugPrint('FORGOT PASSWORD ERROR: $e');
       return {
         'ok': false,
-        'message': 'Network error. Please check your connection and try again.',
+        'message': 'Something went wrong. Please try again.',
       };
     }
   }
@@ -152,7 +122,10 @@ class _ForgotPasswordService {
 // SCREEN
 // ─────────────────────────────────────────────
 class ForgotPasswordScreen extends StatefulWidget {
-  const ForgotPasswordScreen({super.key, String? initialEmail});
+  const ForgotPasswordScreen({super.key, this.initialEmail});
+
+  /// Optional: pre-fill the email typed on the login screen.
+  final String? initialEmail;
 
   @override
   State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
@@ -160,452 +133,218 @@ class ForgotPasswordScreen extends StatefulWidget {
 
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  late final TextEditingController _emailController;
   final _service = _ForgotPasswordService();
 
   bool _loading = false;
+  bool _disposed = false;
   String? _errorText;
-  String? _successMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController = TextEditingController(text: widget.initialEmail ?? '');
+  }
 
   @override
   void dispose() {
+    _disposed = true;
     _emailController.dispose();
     super.dispose();
   }
 
+  /// Safe setState that no-ops after dispose.
+  void _safeSetState(VoidCallback fn) {
+    if (_disposed || !mounted) return;
+    setState(fn);
+  }
+
   Future<void> _submit() async {
-    // Clear previous messages
-    setState(() {
-      _errorText = null;
-      _successMessage = null;
-    });
+    if (_disposed || _loading) return;
 
-    if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+    _safeSetState(() => _errorText = null);
 
-    setState(() {
-      _loading = true;
-    });
+    if (!(_formKey.currentState?.validate() ?? false)) return;
 
+    _safeSetState(() => _loading = true);
+
+    // Capture email BEFORE await — never touch controller after await.
     final email = _emailController.text.trim();
     final result = await _service.sendOtp(email);
 
-    if (!mounted) return;
-
-    setState(() => _loading = false);
+    if (_disposed || !mounted) return;
+    _safeSetState(() => _loading = false);
 
     if (result['ok'] == true) {
-      // Show success message
-      setState(() {
-        _successMessage = result['message'] as String;
-      });
-
-      // Show snackbar
+      HapticFeedback.lightImpact();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(result['message'] as String),
-          backgroundColor: _LightTheme.primaryBlue,
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFF1B7F4B),
           duration: const Duration(seconds: 2),
+          content: Text(result['message'] as String),
         ),
       );
 
-      // Navigate to OTP verification screen
       final emailToSend = result['email'] as String? ?? email;
-      Navigator.push(
+      if (!mounted) return;
+      await Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => VerifyOtpScreen(email: emailToSend)),
       );
     } else {
-      setState(() => _errorText = result['message'] as String);
-
-      // Also show snackbar for errors
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message'] as String),
-          backgroundColor: _LightTheme.danger,
-          duration: const Duration(seconds: 3),
-        ),
-      );
+      HapticFeedback.mediumImpact();
+      _safeSetState(() => _errorText = result['message'] as String);
     }
   }
 
-  String? _validateEmail(String? value) {
-    final v = (value ?? '').trim();
-    if (v.isEmpty) return 'Please enter your email address';
-    final emailRegex = RegExp(
-      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-    );
-    if (!emailRegex.hasMatch(v)) return 'Enter a valid email address';
-    return null;
+  void _goBack() {
+    if (!mounted) return;
+    if (Navigator.canPop(context)) Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _LightTheme.backgroundGradient.first,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: _LightTheme.backgroundGradient,
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _BackButton(
-                    onTap: () {
-                      if (Navigator.canPop(context)) Navigator.pop(context);
-                    },
-                  ),
-                  const SizedBox(height: 24),
-                  _IllustrationBadge(
-                    icon: Icons.lock_reset_rounded,
-                    color: _LightTheme.primaryBlue,
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Forgot Password?',
-                    style: TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800,
-                      color: _LightTheme.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    "No worries. Enter the email linked to your account "
-                    "and we'll send you a 6-digit code to reset your password.",
-                    style: TextStyle(
-                      fontSize: 14,
-                      height: 1.5,
-                      color: _LightTheme.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  const Text(
-                    'Email address',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: _LightTheme.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _AuthTextField(
-                    controller: _emailController,
-                    hint: 'you@example.com',
-                    icon: Icons.email_outlined,
-                    keyboardType: TextInputType.emailAddress,
-                    validator: _validateEmail,
-                    onChanged: (_) {
-                      if (_errorText != null || _successMessage != null) {
-                        setState(() {
-                          _errorText = null;
-                          _successMessage = null;
-                        });
-                      }
-                    },
-                  ),
-                  if (_errorText != null) ...[
-                    const SizedBox(height: 10),
-                    _ErrorBanner(message: _errorText!),
-                  ],
-                  if (_successMessage != null) ...[
-                    const SizedBox(height: 10),
-                    _SuccessBanner(message: _successMessage!),
-                  ],
-                  const SizedBox(height: 28),
-                  _PrimaryButton(
-                    label: 'Send OTP',
-                    loading: _loading,
-                    onTap: _submit,
-                  ),
-                  const SizedBox(height: 20),
-                  Center(
-                    child: TextButton(
-                      onPressed: () {
-                        if (Navigator.canPop(context)) Navigator.pop(context);
-                      },
-                      child: const Text(
-                        'Back to Login',
-                        style: TextStyle(
-                          color: _LightTheme.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+    return QLAuthLayout(
+      header: _buildHeader(),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_errorText != null) ...[
+              QLErrorBanner(message: _errorText!),
+              const SizedBox(height: 16),
+            ],
+            const QLFieldLabel('Email address'),
+            const SizedBox(height: 6),
+            TextFormField(
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.done,
+              autofillHints: const [AutofillHints.email],
+              onFieldSubmitted: (_) => _submit(),
+              onChanged: (_) {
+                if (_errorText != null) {
+                  _safeSetState(() => _errorText = null);
+                }
+              },
+              style: qlInputStyle,
+              cursorColor: QL.blue,
+              decoration: qlFieldDecoration(
+                hint: 'name@example.com',
+                icon: Icons.mail_outline_rounded,
+              ),
+              validator: (v) {
+                final value = v?.trim() ?? '';
+                if (value.isEmpty) return 'Please enter your email address';
+                if (!_emailRegex.hasMatch(value)) {
+                  return 'Enter a valid email address';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 22),
+            QLPrimaryButton(
+              label: 'Send OTP',
+              isLoading: _loading,
+              onTap: _submit,
+            ),
+            const Spacer(),
+            const SizedBox(height: 20),
+            Center(
+              child: TextButton.icon(
+                onPressed: _goBack,
+                style: TextButton.styleFrom(
+                  foregroundColor: QL.blue,
+                  minimumSize: const Size(44, 44),
+                ),
+                icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                label: const Text(
+                  'Back to login',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                ),
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-// SHARED WIDGETS
-// ─────────────────────────────────────────────
-
-class _BackButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _BackButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: _LightTheme.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: _LightTheme.border),
-          boxShadow: _LightTheme.blueShadow(
-            blur: 10,
-            offset: const Offset(0, 3),
-            opacity: 0.12,
-          ),
-        ),
-        child: const Icon(
-          Icons.arrow_back_ios_new_rounded,
-          size: 18,
-          color: _LightTheme.primaryBlue,
-        ),
-      ),
-    );
-  }
-}
-
-class _IllustrationBadge extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  const _IllustrationBadge({required this.icon, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 76,
-      height: 76,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            color.withValues(alpha: 0.16),
-            color.withValues(alpha: 0.06),
           ],
         ),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: color.withValues(alpha: 0.24)),
-        boxShadow: _LightTheme.blueShadow(
-          blur: 20,
-          offset: const Offset(0, 8),
-          opacity: 0.18,
-        ),
-      ),
-      child: Icon(icon, color: color, size: 34),
-    );
-  }
-}
-
-class _AuthTextField extends StatelessWidget {
-  final TextEditingController controller;
-  final String hint;
-  final IconData icon;
-  final TextInputType? keyboardType;
-  final bool obscureText;
-  final Widget? suffix;
-  final String? Function(String?)? validator;
-  final void Function(String)? onChanged;
-
-  const _AuthTextField({
-    required this.controller,
-    required this.hint,
-    required this.icon,
-    this.keyboardType,
-    this.validator,
-    this.onChanged,
-  }) : suffix = null, obscureText = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: _LightTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _LightTheme.border),
-        boxShadow: _LightTheme.blueShadow(
-          blur: 14,
-          offset: const Offset(0, 5),
-          opacity: 0.08,
-        ),
-      ),
-      child: TextFormField(
-        controller: controller,
-        keyboardType: keyboardType,
-        obscureText: obscureText,
-        validator: validator,
-        onChanged: onChanged,
-        style: const TextStyle(
-          color: _LightTheme.textPrimary,
-          fontWeight: FontWeight.w600,
-          fontSize: 15,
-        ),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: const TextStyle(
-            color: _LightTheme.textSecondary,
-            fontWeight: FontWeight.w400,
-          ),
-          prefixIcon: Icon(icon, color: _LightTheme.primaryBlue, size: 20),
-          suffixIcon: suffix,
-          filled: false,
-          border: InputBorder.none,
-          errorBorder: InputBorder.none,
-          focusedErrorBorder: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 16,
-            horizontal: 4,
-          ),
-        ),
       ),
     );
   }
-}
 
-class _ErrorBanner extends StatelessWidget {
-  final String message;
-  const _ErrorBanner({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: _LightTheme.danger.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _LightTheme.danger.withValues(alpha: 0.25)),
-      ),
-      child: Row(
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 24, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.error_outline_rounded,
-            color: _LightTheme.danger,
-            size: 18,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(
-                color: _LightTheme.danger,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+          Row(
+            children: [
+              Semantics(
+                button: true,
+                label: 'Back',
+                child: InkWell(
+                  onTap: _goBack,
+                  customBorder: const CircleBorder(),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: const BoxDecoration(
+                      color: QL.navyDeep,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.arrow_back_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                  ),
+                ),
               ),
+              const Spacer(),
+              const QLBrandMark(size: 38, fontSize: 18),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 8, top: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    color: QL.gold,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: const Icon(
+                    Icons.lock_reset_rounded,
+                    color: QL.navy,
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Forgot password?',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  "No worries. Enter the email linked to your account and "
+                  "we'll send you a 6-digit code to reset your password.",
+                  style: TextStyle(color: QL.ice, fontSize: 14, height: 1.5),
+                ),
+              ],
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SuccessBanner extends StatelessWidget {
-  final String message;
-  const _SuccessBanner({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: _LightTheme.primaryBlue.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _LightTheme.primaryBlue.withValues(alpha: 0.25),
-        ),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.check_circle_outline_rounded,
-            color: _LightTheme.primaryBlue,
-            size: 18,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(
-                color: _LightTheme.primaryBlue,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PrimaryButton extends StatelessWidget {
-  final String label;
-  final bool loading;
-  final VoidCallback onTap;
-
-  const _PrimaryButton({
-    required this.label,
-    required this.loading,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: loading ? null : onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 17),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [_LightTheme.primaryBlue, _LightTheme.accentCyan],
-          ),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: _LightTheme.blueShadow(
-            blur: 20,
-            offset: const Offset(0, 8),
-            opacity: 0.32,
-          ),
-        ),
-        child: loading
-            ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.4,
-                  color: Colors.white,
-                ),
-              )
-            : Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15.5,
-                ),
-              ),
       ),
     );
   }
